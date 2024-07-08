@@ -238,7 +238,7 @@ def eval_policy(
     assert isinstance(policy, Policy)
     start = time.time()
     policy.eval()
-
+    print("num envs ", env.num_envs)
     # Determine how many batched rollouts we need to get n_episodes. Note that if n_episodes is not evenly
     # divisible by env.num_envs we end up discarding some data in the last batch.
     n_batches = n_episodes // env.num_envs + int((n_episodes % env.num_envs) != 0)
@@ -282,6 +282,7 @@ def eval_policy(
             seeds = range(
                 start_seed + (batch_ix * env.num_envs), start_seed + ((batch_ix + 1) * env.num_envs)
             )
+        print("seeds ", seeds)
         rollout_data = rollout(
             env,
             policy,
@@ -387,6 +388,7 @@ def eval_policy(
         thread.join()
 
     # Compile eval info.
+    print("aggregating info for ", n_episodes)
     info = {
         "per_episode": [
             {
