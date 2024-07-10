@@ -47,6 +47,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         root: Path | None = DATA_DIR,
         split: str = "train",
         image_transforms: Callable | None = None,
+        custom_transforms: Callable | None = None,
         delta_timestamps: dict[list[float]] | None = None,
         video_backend: str | None = None,
     ):
@@ -56,6 +57,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.root = root
         self.split = split
         self.image_transforms = image_transforms
+        self.custom_transforms = custom_transforms
         self.delta_timestamps = delta_timestamps
         # load data from hub or locally when root is provided
         # TODO(rcadene, aliberts): implement faster transfer
@@ -157,6 +159,10 @@ class LeRobotDataset(torch.utils.data.Dataset):
         if self.image_transforms is not None:
             for cam in self.camera_keys:
                 item[cam] = self.image_transforms(item[cam])
+
+
+        if self.custom_transforms is not None:
+            item = self.custom_transforms(item)
 
         return item
 
