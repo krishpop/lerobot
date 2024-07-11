@@ -46,6 +46,7 @@ import json
 import logging
 import threading
 import time
+import os
 from contextlib import nullcontext
 from copy import deepcopy
 from datetime import datetime as dt
@@ -74,6 +75,10 @@ from lerobot.common.policies.policy_protocol import Policy
 from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.utils import get_safe_torch_device, init_hydra_config, init_logging, set_global_seed
+from lerobot.scripts.push_dataset_to_hub import save_meta_data
+from lerobot.common.datasets.compute_stats import compute_stats
+from lerobot.common.datasets.utils import flatten_dict
+from safetensors.torch import save_file
 
 
 def rollout(
@@ -419,7 +424,10 @@ def eval_policy(
 
     if return_episode_data:
         info["episodes"] = episode_data
-
+        info["episodes"]["hf_dataset"] = info["episodes"]["hf_dataset"].with_format(None)
+        dataset = info["episodes"]["hf_dataset"]
+        dataset.save_to_disk("diffusion_policy_rollout")
+        print("saved locally")
     if max_episodes_rendered > 0:
         info["video_paths"] = video_paths
 
@@ -565,6 +573,7 @@ def main(
             hydra_cfg.eval.n_episodes,
             max_episodes_rendered=10,
             videos_dir=Path(out_dir) / "videos",
+            return_episode_data=True,
             start_seed=hydra_cfg.seed,
             enable_progbar=True,
             enable_inner_progbar=True,
@@ -572,8 +581,8 @@ def main(
     print(info["aggregated"])
 
     # Save info
-    with open(Path(out_dir) / "eval_info.json", "w") as f:
-        json.dump(info, f, indent=2)
+    #with open(Path(out_dir) / "eval_info.json", "w") as f:
+    #    json.dump(info, f, indent=2)
 
     env.close()
 
