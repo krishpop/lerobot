@@ -134,6 +134,23 @@ class DiffusionPolicy(nn.Module, PyTorchModelHubMixin):
         action = self._queues["action"].popleft()
         return action
 
+    @torch.no_grad
+    def select_action_robomimic(self, batch: dict[str, Tensor], normalize_obs=False) -> Tensor:
+        """Select a single action given current environment observations, without any queueing of previous observations.
+        """
+        batch["observation.state"] = batch["observation_state"]
+        batch["observation.image"] = batch["observation_image"]
+        if normalize_obs:
+            batch = self.normalize_inputs(batch)
+        batch["observation.images"] = torch.stack([batch[k] for k in self.expected_image_keys], dim=-4)
+        # copy observations to previous n_obs_steps
+        batch["observation.state"] = batch["observation.state"].unsqueeze(1)
+        batch["observation.images"] = batch["observation.images"].unsqueeze(1)
+        batch["observation.state"] = batch["observation.state"].repeat(1, self.config.n_obs_steps, 1)
+        batch["observation.images"] = batch["observation.images"].repeat(1, self.config.n_obs_steps, 1, 1, 1, 1)
+        actions = self.diffusion.generate_actions(batch).transpose(0,1)
+        return actions[0]
+
     def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
         """Run the batch through the model and compute the loss for training or validation."""
         batch = self.normalize_inputs(batch)
