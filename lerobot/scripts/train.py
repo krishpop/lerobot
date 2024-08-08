@@ -45,7 +45,6 @@ from lerobot.common.utils.utils import (
 )
 from lerobot.scripts.eval import eval_policy
 
-
 def make_optimizer_and_scheduler(cfg, policy):
     if cfg.policy.name == "act":
         optimizer_params_dicts = [
@@ -290,7 +289,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("make_dataset")
-    offline_dataset = make_dataset(cfg)
+    offline_dataset = make_dataset(cfg, root = "pusht_dataset_scale_0.5")
     if isinstance(offline_dataset, MultiLeRobotDataset):
         logging.info(
             "Multiple datasets were provided. Applied the following index mapping to the provided datasets: "

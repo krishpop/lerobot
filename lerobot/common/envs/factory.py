@@ -17,7 +17,7 @@ import importlib
 
 import gymnasium as gym
 from omegaconf import DictConfig
-
+from gym_pusht.envs.pusht import PushTEnv
 
 def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv:
     """Makes a gym vector environment according to the evaluation config.

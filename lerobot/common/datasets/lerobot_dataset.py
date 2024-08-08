@@ -221,6 +221,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         obj.info = info if info is not None else {}
         obj.videos_dir = videos_dir
         obj.video_backend = video_backend if video_backend is not None else "pyav"
+        obj.custom_transforms = None
         return obj
 
 
