@@ -45,21 +45,18 @@ from lerobot.common.utils.utils import (
 )
 from lerobot.scripts.eval import eval_policy
 
+
 def make_optimizer_and_scheduler(cfg, policy):
     if cfg.policy.name == "act":
         optimizer_params_dicts = [
             {
                 "params": [
-                    p
-                    for n, p in policy.named_parameters()
-                    if not n.startswith("model.backbone") and p.requires_grad
+                    p for n, p in policy.named_parameters() if not n.startswith("model.backbone") and p.requires_grad
                 ]
             },
             {
                 "params": [
-                    p
-                    for n, p in policy.named_parameters()
-                    if n.startswith("model.backbone") and p.requires_grad
+                    p for n, p in policy.named_parameters() if n.startswith("model.backbone") and p.requires_grad
                 ],
                 "lr": cfg.training.lr_backbone,
             },
@@ -270,9 +267,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
         cfg = checkpoint_cfg
         cfg.resume = True
     elif Logger.get_last_checkpoint_dir(out_dir).exists():
-        raise RuntimeError(
-            f"The configured output directory {Logger.get_last_checkpoint_dir(out_dir)} already exists."
-        )
+        raise RuntimeError(f"The configured output directory {Logger.get_last_checkpoint_dir(out_dir)} already exists.")
 
     # log metrics to terminal and wandb
     logger = Logger(cfg, out_dir, wandb_job_name=job_name)
@@ -289,7 +284,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     torch.backends.cuda.matmul.allow_tf32 = True
 
     logging.info("make_dataset")
-    offline_dataset = make_dataset(cfg, root = "pusht_dataset_scale_0.5")
+    offline_dataset = make_dataset(cfg, root=cfg.dataset_root)
     if isinstance(offline_dataset, MultiLeRobotDataset):
         logging.info(
             "Multiple datasets were provided. Applied the following index mapping to the provided datasets: "
@@ -356,8 +351,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
             logging.info("Resume training")
 
         if cfg.training.save_checkpoint and (
-            step % cfg.training.save_freq == 0
-            or step == cfg.training.offline_steps + cfg.training.online_steps
+            step % cfg.training.save_freq == 0 or step == cfg.training.offline_steps + cfg.training.online_steps
         ):
             logging.info(f"Checkpoint policy after step {step}")
             # Note: Save with step as the identifier, and format it to have at least 6 digits but more if
