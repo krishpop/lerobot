@@ -47,7 +47,10 @@ policy:
     action: ["${env.action_dim}"]
 
   # Normalization / Unnormalization
-  input_normalization_modes: null
+  input_normalization_modes:
+    observation.image: mean_std
+    # Use min_max normalization just because it's more standard.
+    observation.state: min_max
   output_normalization_modes:
     action: min_max
 

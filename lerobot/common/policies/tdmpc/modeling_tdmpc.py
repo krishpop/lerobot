@@ -164,13 +164,13 @@ class TDMPCPolicy(nn.Module, PyTorchModelHubMixin):
                 # Plan with the policy (π) alone.
                 action = self.model.pi(z)
 
-            self.unnormalize_outputs({"action": action})["action"]
+            action = self.unnormalize_outputs({"action": action.clamp(-1, 1)})["action"]
 
             for _ in range(self.config.n_action_repeats):
                 self._queues["action"].append(action)
 
         action = self._queues["action"].popleft()
-        return torch.clamp(action, -1, 1)
+        return action
 
     @torch.no_grad()
     def plan(self, z: Tensor) -> Tensor:
