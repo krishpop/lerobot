@@ -98,6 +98,7 @@ class VQBeTPolicy(nn.Module, PyTorchModelHubMixin):
         """
 
         batch = self.normalize_inputs(batch)
+        task_index = batch.get("task_index")
         batch["observation.images"] = torch.stack([batch[k] for k in self.expected_image_keys], dim=-4)
         # Note: It's important that this happens after stacking the images into a single key.
         self._queues = populate_queues(self._queues, batch)
@@ -110,6 +111,8 @@ class VQBeTPolicy(nn.Module, PyTorchModelHubMixin):
 
         if len(self._queues["action"]) == 0:
             batch = {k: torch.stack(list(self._queues[k]), dim=1) for k in batch if k in self._queues}
+            if task_index is not None:
+                batch["task_index"] = task_index
             actions = self.vqbet(batch, rollout=True)[:, : self.config.action_chunk_size]
 
             # the dimension of returned action is (batch_size, action_chunk_size, action_dim)
@@ -303,6 +306,7 @@ class VQBeTModel(nn.Module):
             "select_target_actions_indices",
             torch.row_stack([torch.arange(i, i + self.config.action_chunk_size) for i in range(num_tokens)]),
         )
+        self._task_emb = nn.Linear(3, 512, bias=False)
 
     def forward(self, batch: dict[str, Tensor], rollout: bool) -> Tensor:
         # Input validation.
@@ -329,6 +333,12 @@ class VQBeTModel(nn.Module):
             self.state_projector(batch["observation.state"])
         )  # (batch, obs_step, projection dims)
         input_tokens.append(einops.repeat(self.action_token, "1 1 d -> b n d", b=batch_size, n=n_obs_steps))
+        # batch should have "task_index" for multitask training and evaluation
+        if "task_index" in batch:
+            task_indices = batch["task_index"]
+            task_one_hot = F.one_hot(task_indices, 3).float()
+            task_embedding = self._task_emb(task_one_hot)
+            input_tokens.append(einops.repeat(task_embedding, "b d -> b n d", b=batch_size, n=n_obs_steps))
         # Interleave tokens by stacking and rearranging.
         input_tokens = torch.stack(input_tokens, dim=2)
         input_tokens = einops.rearrange(input_tokens, "b n t d -> b (n t) d")

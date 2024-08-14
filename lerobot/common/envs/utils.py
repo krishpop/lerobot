@@ -55,4 +55,7 @@ def preprocess_observation(observations: dict[str, np.ndarray]) -> dict[str, Ten
     # requirement for "agent_pos"
     return_observations["observation.state"] = torch.from_numpy(observations["agent_pos"]).float()
 
+    if "task_index" in observations:
+        return_observations["task_index"] = torch.from_numpy(observations["task_index"])
+
     return return_observations

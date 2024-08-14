@@ -94,6 +94,7 @@ class VQBeTConfig:
         default_factory=lambda: {
             "observation.image": [3, 96, 96],
             "observation.state": [2],
+            "task_index": [1]
         }
     )
     output_shapes: dict[str, list[int]] = field(

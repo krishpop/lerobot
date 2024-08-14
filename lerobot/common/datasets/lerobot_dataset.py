@@ -17,6 +17,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Callable
+from omegaconf import ListConfig
 
 import datasets
 import torch
@@ -236,7 +237,7 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
         self,
         repo_ids: list[str],
         version: str | None = CODEBASE_VERSION,
-        root: Path | None = DATA_DIR,
+        root: Path | None | list[str] = DATA_DIR,
         split: str = "train",
         image_transforms: Callable | None = None,
         delta_timestamps: dict[list[float]] | None = None,
@@ -246,18 +247,33 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
         self.repo_ids = repo_ids
         # Construct the underlying datasets passing everything but `transform` and `delta_timestamps` which
         # are handled by this class.
-        self._datasets = [
-            LeRobotDataset(
-                repo_id,
-                version=version,
-                root=root,
-                split=split,
-                delta_timestamps=delta_timestamps,
-                image_transforms=image_transforms,
-                video_backend=video_backend,
-            )
-            for repo_id in repo_ids
-        ]
+        if isinstance(root, ListConfig):
+            self._datasets = []
+            for i, repo_id in enumerate(repo_ids):
+                self._datasets.append(
+                    LeRobotDataset(
+                        repo_id,
+                        version=version,
+                        root=root[i],
+                        split=split,
+                        delta_timestamps=delta_timestamps,
+                        image_transforms=image_transforms,
+                        video_backend=video_backend,
+                    )
+                )
+        else:
+            self._datasets = [
+                LeRobotDataset(
+                    repo_id,
+                    version=version,
+                    root=root,
+                    split=split,
+                    delta_timestamps=delta_timestamps,
+                    image_transforms=image_transforms,
+                    video_backend=video_backend,
+                )
+                for repo_id in repo_ids
+            ]
         # Check that some properties are consistent across datasets. Note: We may relax some of these
         # consistency requirements in future iterations of this class.
         for repo_id, dataset in zip(self.repo_ids, self._datasets, strict=True):
@@ -392,6 +408,7 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
             raise AssertionError("We expect the loop to break out as long as the index is within bounds.")
         item = self._datasets[dataset_idx][idx - start_idx]
         item["dataset_index"] = torch.tensor(dataset_idx)
+        item["task_index"] = torch.tensor(dataset_idx)
         for data_key in self.disabled_data_keys:
             if data_key in item:
                 del item[data_key]
