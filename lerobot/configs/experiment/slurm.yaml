@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - override /hydra/launcher: slurm_rich
+
+hydra:
+  launcher:
+    account: juno
+    partition: juno
+    cpus_per_task: 16
+    tasks_per_node: 1
+    gres: gpu:1
+    timeout_min: 360

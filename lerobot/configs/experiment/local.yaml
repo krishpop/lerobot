@@ -1,0 +1,10 @@
+# @package _global_
+
+defaults:
+  - override /hydra/launcher: local_rich
+
+hydra:
+  launcher:
+    cpus_per_task: 16
+    tasks_per_node: 1
+    timeout_min: 360
