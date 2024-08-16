@@ -280,8 +280,10 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     # Check device is available
     device = get_safe_torch_device(cfg.device, log=True)
 
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cuda.matmul.allow_tf32 = True
+    # torch.backends.cudnn.benchmark = True
+    # torch.backends.cuda.matmul.allow_tf32 = True
+    eval('setattr(torch.backends.cudnn, "benchmark", True)')
+    eval('setattr(torch.backends.cuda.matmul, "allow_tf32", True)')
 
     logging.info("make_dataset")
     offline_dataset = make_dataset(cfg, root=cfg.dataset_root)
