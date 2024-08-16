@@ -554,7 +554,7 @@ def main(
     log_output_dir(out_dir)
 
     logging.info("Making environment.")
-    env = make_env(hydra_cfg, n_envs=16)
+    env = make_env(hydra_cfg)
 
     logging.info("Making policy.")
     if hydra_cfg_path is None:
