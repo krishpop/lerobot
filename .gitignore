@@ -151,3 +151,4 @@ dmypy.json
 cython_debug/
 pusht_dataset_scale*
 **multirun/
+datasets/

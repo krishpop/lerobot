@@ -336,7 +336,7 @@ class VQBeTModel(nn.Module):
         # batch should have "task_index" for multitask training and evaluation
         if "task_index" in batch:
             task_indices = batch["task_index"]
-            task_one_hot = F.one_hot(task_indices, 3).float()
+            task_one_hot = F.one_hot(task_indices, 3).float()   # TODO@bsud: remove hardcoded 3
             task_embedding = self._task_emb(task_one_hot)
             input_tokens.append(einops.repeat(task_embedding, "b d -> b n d", b=batch_size, n=n_obs_steps))
         # Interleave tokens by stacking and rearranging.
