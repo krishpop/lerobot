@@ -211,7 +211,7 @@ def _mock_download_raw_dora(raw_dir, num_frames=6, num_episodes=3, fps=30):
 
         fname = f"{cam_key}_episode_{ep_idx:06d}.mp4"
         video_path = raw_dir / "videos" / fname
-        encode_video_frames(tmp_imgs_dir, video_path, fps)
+        encode_video_frames(tmp_imgs_dir, video_path, fps, vcodec="libx264")
 
 
 def _mock_download_raw(raw_dir, repo_id):
@@ -280,6 +280,7 @@ def test_push_dataset_to_hub_format(required_packages, tmpdir, raw_format, repo_
         force_override=False,
         cache_dir=tmpdir / "cache",
         tests_data_dir=tmpdir / "tests/data" if make_test_data else None,
+        encoding={"vcodec": "libx264"},
     )
 
     # minimal generic tests on the local directory containing LeRobotDataset

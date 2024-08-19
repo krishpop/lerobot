@@ -17,7 +17,7 @@ import logging
 import os.path as osp
 import random
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Generator
 
@@ -158,6 +158,7 @@ def init_hydra_config(config_path: str, overrides: list[str] | None = None) -> D
         version_base="1.2",
     )
     cfg = hydra.compose(Path(config_path).stem, overrides)
+
     return cfg
 
 
@@ -172,3 +173,7 @@ def print_cuda_memory_usage():
     print("Maximum GPU Memory Allocated: {:.2f} MB".format(torch.cuda.max_memory_allocated(0) / 1024**2))
     print("Current GPU Memory Reserved: {:.2f} MB".format(torch.cuda.memory_reserved(0) / 1024**2))
     print("Maximum GPU Memory Reserved: {:.2f} MB".format(torch.cuda.max_memory_reserved(0) / 1024**2))
+
+
+def capture_timestamp_utc():
+    return datetime.now(timezone.utc)

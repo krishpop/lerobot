@@ -38,7 +38,13 @@ from lerobot.common.policies.vqbet.vqbet_utils import GPT, ResidualVQ
 # ruff: noqa: N806
 
 
-class VQBeTPolicy(nn.Module, PyTorchModelHubMixin):
+class VQBeTPolicy(
+    nn.Module,
+    PyTorchModelHubMixin,
+    library_name="lerobot",
+    repo_url="https://github.com/huggingface/lerobot",
+    tags=["robotics", "vqbet"],
+):
     """
     VQ-BeT Policy as per "Behavior Generation with Latent Actions"
     """
@@ -61,15 +67,9 @@ class VQBeTPolicy(nn.Module, PyTorchModelHubMixin):
         if config is None:
             config = VQBeTConfig()
         self.config = config
-        self.normalize_inputs = Normalize(
-            config.input_shapes, config.input_normalization_modes, dataset_stats
-        )
-        self.normalize_targets = Normalize(
-            config.output_shapes, config.output_normalization_modes, dataset_stats
-        )
-        self.unnormalize_outputs = Unnormalize(
-            config.output_shapes, config.output_normalization_modes, dataset_stats
-        )
+        self.normalize_inputs = Normalize(config.input_shapes, config.input_normalization_modes, dataset_stats)
+        self.normalize_targets = Normalize(config.output_shapes, config.output_normalization_modes, dataset_stats)
+        self.unnormalize_outputs = Unnormalize(config.output_shapes, config.output_normalization_modes, dataset_stats)
 
         self.vqbet = VQBeTModel(config)
 
@@ -98,6 +98,7 @@ class VQBeTPolicy(nn.Module, PyTorchModelHubMixin):
         """
 
         batch = self.normalize_inputs(batch)
+        batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
         task_index = batch.get("task_index")
         batch["observation.images"] = torch.stack([batch[k] for k in self.expected_image_keys], dim=-4)
         # Note: It's important that this happens after stacking the images into a single key.
@@ -126,6 +127,7 @@ class VQBeTPolicy(nn.Module, PyTorchModelHubMixin):
     def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
         """Run the batch through the model and compute the loss for training or validation."""
         batch = self.normalize_inputs(batch)
+        batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
         batch["observation.images"] = torch.stack([batch[k] for k in self.expected_image_keys], dim=-4)
         batch = self.normalize_targets(batch)
         # VQ-BeT discretizes action using VQ-VAE before training BeT (please refer to section 3.2 in the VQ-BeT paper https://arxiv.org/pdf/2403.03181)
@@ -133,8 +135,8 @@ class VQBeTPolicy(nn.Module, PyTorchModelHubMixin):
             # loss: total loss of training RVQ
             # n_different_codes: how many of the total possible VQ codes are being used in single batch (how many of them have at least one encoder embedding as a nearest neighbor). This can be at most `vqvae_n_embed * number of layers of RVQ (=2)`.
             # n_different_combinations: how many different code combinations are being used out of all possible combinations in single batch. This can be at most `vqvae_n_embed ^ number of layers of RVQ (=2)` (hint consider the RVQ as a decision tree).
-            loss, n_different_codes, n_different_combinations, recon_l1_error = (
-                self.vqbet.action_head.discretize(self.config.n_vqvae_training_steps, batch["action"])
+            loss, n_different_codes, n_different_combinations, recon_l1_error = self.vqbet.action_head.discretize(
+                self.config.n_vqvae_training_steps, batch["action"]
             )
             return {
                 "loss": loss,
@@ -290,23 +292,22 @@ class VQBeTModel(nn.Module):
 
         # To input state and observation features into GPT layers, we first project the features to fit the shape of input size of GPT.
         self.state_projector = MLP(
-            config.output_shapes["action"][0], hidden_channels=[self.config.gpt_input_dim]
+            config.input_shapes["observation.state"][0], hidden_channels=[self.config.gpt_input_dim]
         )
-        self.rgb_feature_projector = MLP(
-            self.rgb_encoder.feature_dim, hidden_channels=[self.config.gpt_input_dim]
-        )
+        self.rgb_feature_projector = MLP(self.rgb_encoder.feature_dim, hidden_channels=[self.config.gpt_input_dim])
 
         # GPT part of VQ-BeT
         self.policy = GPT(config)
         # bin prediction head / offset prediction head part of VQ-BeT
         self.action_head = VQBeTHead(config)
 
-        num_tokens = self.config.n_action_pred_token + self.config.action_chunk_size - 1
+        # Action tokens for: each observation step, the current action token, and all future action tokens.
+        num_tokens = self.config.n_action_pred_token + self.config.n_obs_steps - 1
         self.register_buffer(
             "select_target_actions_indices",
             torch.row_stack([torch.arange(i, i + self.config.action_chunk_size) for i in range(num_tokens)]),
         )
-        self._task_emb = nn.Embedding(3, 512, max_norm=1)       # TODO@bsud: remove hardcoded 3
+        self._task_emb = nn.Embedding(3, 512, max_norm=1)  # TODO@bsud: remove hardcoded 3
 
     def forward(self, batch: dict[str, Tensor], rollout: bool) -> Tensor:
         # Input validation.
@@ -315,9 +316,7 @@ class VQBeTModel(nn.Module):
         assert n_obs_steps == self.config.n_obs_steps
 
         # Extract image feature (first combine batch and sequence dims).
-        img_features = self.rgb_encoder(
-            einops.rearrange(batch["observation.images"], "b s n ... -> (b s n) ...")
-        )
+        img_features = self.rgb_encoder(einops.rearrange(batch["observation.images"], "b s n ... -> (b s n) ..."))
         # Separate batch and sequence dims.
         img_features = einops.rearrange(
             img_features, "(b s n) ... -> b s n ...", b=batch_size, s=n_obs_steps, n=self.num_images
@@ -329,9 +328,7 @@ class VQBeTModel(nn.Module):
             img_features
         )  # (batch, obs_step, number of different cameras, projection dims)
         input_tokens = [rgb_tokens[:, :, i] for i in range(rgb_tokens.size(2))]
-        input_tokens.append(
-            self.state_projector(batch["observation.state"])
-        )  # (batch, obs_step, projection dims)
+        input_tokens.append(self.state_projector(batch["observation.state"]))  # (batch, obs_step, projection dims)
         input_tokens.append(einops.repeat(self.action_token, "1 1 d -> b n d", b=batch_size, n=n_obs_steps))
         # batch should have "task_index" for multitask training and evaluation
         if "task_index" in batch:
@@ -432,9 +429,7 @@ class VQBeTHead(nn.Module):
         # `actions` is a tensor of shape (new_batch, action_chunk_size, action_dim) where new_batch is the number of possible chunks created from the original sequences using the sliding window.
 
         loss, metric = self.vqvae_model.vqvae_forward(actions)
-        n_different_codes = sum(
-            [len(torch.unique(metric[2][:, i])) for i in range(self.vqvae_model.vqvae_num_layers)]
-        )
+        n_different_codes = sum([len(torch.unique(metric[2][:, i])) for i in range(self.vqvae_model.vqvae_num_layers)])
         n_different_combinations = len(torch.unique(metric[2], dim=0))
         recon_l1_error = metric[0].detach().cpu().item()
         self.vqvae_model.optimized_steps += 1
@@ -468,9 +463,7 @@ class VQBeTHead(nn.Module):
             cbet_primary_logits = self.map_to_cbet_preds_primary_bin(x)
 
             # select primary bin first
-            cbet_primary_probs = torch.softmax(
-                cbet_primary_logits / self.config.bet_softmax_temperature, dim=-1
-            )
+            cbet_primary_probs = torch.softmax(cbet_primary_logits / self.config.bet_softmax_temperature, dim=-1)
             NT, choices = cbet_primary_probs.shape
             sampled_primary_centers = einops.rearrange(
                 torch.multinomial(cbet_primary_probs.view(-1, choices), num_samples=1),
@@ -484,9 +477,7 @@ class VQBeTHead(nn.Module):
                     axis=1,
                 )
             )
-            cbet_secondary_probs = torch.softmax(
-                cbet_secondary_logits / self.config.bet_softmax_temperature, dim=-1
-            )
+            cbet_secondary_probs = torch.softmax(cbet_secondary_logits / self.config.bet_softmax_temperature, dim=-1)
             sampled_secondary_centers = einops.rearrange(
                 torch.multinomial(cbet_secondary_probs.view(-1, choices), num_samples=1),
                 "(NT) 1 -> NT",
@@ -497,9 +488,7 @@ class VQBeTHead(nn.Module):
         # if self.config.sequentially_select is False, bin prediction head samples primary and secondary code at once.
         else:
             cbet_logits = self.map_to_cbet_preds_bin(x)
-            cbet_logits = einops.rearrange(
-                cbet_logits, "(NT) (G C) -> (NT) G C", G=self.vqvae_model.vqvae_num_layers
-            )
+            cbet_logits = einops.rearrange(cbet_logits, "(NT) (G C) -> (NT) G C", G=self.vqvae_model.vqvae_num_layers)
             cbet_probs = torch.softmax(cbet_logits / self.config.bet_softmax_temperature, dim=-1)
             NT, G, choices = cbet_probs.shape
             sampled_centers = einops.rearrange(
@@ -524,9 +513,7 @@ class VQBeTHead(nn.Module):
             # pass the centroids through decoder to get actions.
             decoded_action = self.vqvae_model.get_action_from_latent(return_decoder_input).clone().detach()
         # reshaped extracted offset to match with decoded centroids
-        sampled_offsets = einops.rearrange(
-            sampled_offsets, "NT (W A) -> NT W A", W=self.config.action_chunk_size
-        )
+        sampled_offsets = einops.rearrange(sampled_offsets, "NT (W A) -> NT W A", W=self.config.action_chunk_size)
         # add offset and decoded centroids
         predicted_action = decoded_action + sampled_offsets
         predicted_action = einops.rearrange(
@@ -563,9 +550,7 @@ class VQBeTHead(nn.Module):
 
         cbet_logits = pred["cbet_logits"]
 
-        predicted_action = einops.rearrange(
-            predicted_action, "N T (W A) -> (N T) W A", W=self.config.action_chunk_size
-        )
+        predicted_action = einops.rearrange(predicted_action, "N T (W A) -> (N T) W A", W=self.config.action_chunk_size)
 
         action_seq = einops.rearrange(action_seq, "N T W A -> (N T) W A")
         # Figure out the loss for the actions.
@@ -590,8 +575,7 @@ class VQBeTHead(nn.Module):
         )
         # add all the prediction loss
         cbet_loss = (
-            cbet_loss1 * self.config.primary_code_loss_weight
-            + cbet_loss2 * self.config.secondary_code_loss_weight
+            cbet_loss1 * self.config.primary_code_loss_weight + cbet_loss2 * self.config.secondary_code_loss_weight
         )
 
         equal_primary_code_rate = torch.sum((action_bins[:, 0] == sampled_centers[:, 0]).int()) / (NT)
@@ -685,9 +669,7 @@ class VQBeTScheduler(nn.Module):
                 current_step = current_step - n_vqvae_training_steps
                 if current_step < num_warmup_steps:
                     return float(current_step) / float(max(1, num_warmup_steps))
-                progress = float(current_step - num_warmup_steps) / float(
-                    max(1, num_training_steps - num_warmup_steps)
-                )
+                progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
                 return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
 
         self.lr_scheduler = LambdaLR(optimizer, lr_lambda, -1)
@@ -719,17 +701,13 @@ class VQBeTRgbEncoder(nn.Module):
             self.do_crop = False
 
         # Set up backbone.
-        backbone_model = getattr(torchvision.models, config.vision_backbone)(
-            weights=config.pretrained_backbone_weights
-        )
+        backbone_model = getattr(torchvision.models, config.vision_backbone)(weights=config.pretrained_backbone_weights)
         # Note: This assumes that the layer4 feature map is children()[-3]
         # TODO(alexander-soare): Use a safer alternative.
         self.backbone = nn.Sequential(*(list(backbone_model.children())[:-2]))
         if config.use_group_norm:
             if config.pretrained_backbone_weights:
-                raise ValueError(
-                    "You can't replace BatchNorm in a pretrained model without ruining the weights!"
-                )
+                raise ValueError("You can't replace BatchNorm in a pretrained model without ruining the weights!")
             self.backbone = _replace_submodules(
                 root_module=self.backbone,
                 predicate=lambda x: isinstance(x, nn.BatchNorm2d),
@@ -744,9 +722,7 @@ class VQBeTRgbEncoder(nn.Module):
         image_keys = [k for k in config.input_shapes if k.startswith("observation.image")]
         assert len(image_keys) == 1
         image_key = image_keys[0]
-        dummy_input_h_w = (
-            config.crop_shape if config.crop_shape is not None else config.input_shapes[image_key][1:]
-        )
+        dummy_input_h_w = config.crop_shape if config.crop_shape is not None else config.input_shapes[image_key][1:]
         dummy_input = torch.zeros(size=(1, config.input_shapes[image_key][0], *dummy_input_h_w))
         with torch.inference_mode():
             dummy_feature_map = self.backbone(dummy_input)

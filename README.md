@@ -22,6 +22,18 @@
 
 </div>
 
+<h2 align="center">
+    <p>Hot News: <a href="https://github.com/huggingface/lerobot/blob/main/examples/7_get_started_with_real_robot.md">New tutorial: Getting starting with Real-World Robots</a></p>
+</h2>
+
+<div align="center">
+    <img src="media/tutorial/koch_v1_1_leader_follower.webp?raw=true" alt="Koch v1.1 leader and follower arms" title="Koch v1.1 leader and follower arms" width="50%">
+    <p>We just dropped an in-depth tutorial on how to build your own robot!</p>
+    <p>Teach it new skills by showing it a few moves with just a laptop.</p>
+    <p>Then watch your homemade robot act autonomously 🤯</p>
+</div>
+
+
 <h3 align="center">
     <p>State-of-the-art Machine Learning for real-world robotics</p>
 </h3>
@@ -65,17 +77,19 @@
 
 Download our source code:
 ```bash
-git clone https://github.com/huggingface/lerobot.git && cd lerobot
+git clone https://github.com/huggingface/lerobot.git
+cd lerobot
 ```
 
 Create a virtual environment with Python 3.10 and activate it, e.g. with [`miniconda`](https://docs.anaconda.com/free/miniconda/index.html):
 ```bash
-conda create -y -n lerobot python=3.10 && conda activate lerobot
+conda create -y -n lerobot python=3.10
+conda activate lerobot
 ```
 
 Install 🤗 LeRobot:
 ```bash
-pip install .
+pip install -e .
 ```
 
 > **NOTE:** Depending on your platform, If you encounter any build errors during this step
@@ -89,7 +103,7 @@ For simulations, 🤗 LeRobot comes with gymnasium environments that can be inst
 
 For instance, to install 🤗 LeRobot with aloha and pusht, use:
 ```bash
-pip install ".[aloha, pusht]"
+pip install -e ".[aloha, pusht]"
 ```
 
 To use [Weights and Biases](https://docs.wandb.ai/quickstart) for experiment tracking, log in with
@@ -114,10 +128,12 @@ wandb login
 |   |   ├── datasets       # various datasets of human demonstrations: aloha, pusht, xarm
 |   |   ├── envs           # various sim environments: aloha, pusht, xarm
 |   |   ├── policies       # various policies: act, diffusion, tdmpc
+|   |   ├── robot_devices  # various real devices: dynamixel motors, opencv cameras, koch robots
 |   |   └── utils          # various utilities
 |   └── scripts          # contains functions to execute via command line
 |       ├── eval.py                 # load policy and evaluate it on an environment
 |       ├── train.py                # train a policy via imitation learning and/or reinforcement learning
+|       ├── control_robot.py        # teleoperate a real robot, record data, run a policy
 |       ├── push_dataset_to_hub.py  # convert your dataset into LeRobot dataset format and upload it to the Hugging Face hub
 |       └── visualize_dataset.py    # load a dataset and render its demonstrations
 ├── outputs               # contains results of scripts execution: logs, videos, model checkpoints
@@ -180,8 +196,10 @@ dataset attributes:
   │  ├ observation.images.cam_high: {'max': tensor with same number of dimensions (e.g. `(c, 1, 1)` for images, `(c,)` for states), etc.}
   │  ...
   ├ info: a dictionary of metadata on the dataset
+  │  ├ codebase_version (str): this is to keep track of the codebase version the dataset was created with
   │  ├ fps (float): frame per second the dataset is recorded/synchronized to
-  │  └ video (bool): indicates if frames are encoded in mp4 video files to save space or stored as png files
+  │  ├ video (bool): indicates if frames are encoded in mp4 video files to save space or stored as png files
+  │  └ encoding (dict): if video, this documents the main options that were used with ffmpeg to encode the videos
   ├ videos_dir (Path): where the mp4 videos or png images are stored/accessed
   └ camera_keys (list of string): the keys to access camera features in the item returned by the dataset (e.g. `["observation.images.cam_high", ...]`)
 ```
