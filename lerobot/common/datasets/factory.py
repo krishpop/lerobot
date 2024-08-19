@@ -90,7 +90,7 @@ def make_dataset(cfg, split: str = "train", **dataset_kwargs) -> LeRobotDataset 
             random_order=cfg_tf.random_order,
         )
 
-    if isinstance(cfg.dataset_repo_id, str):
+    if isinstance(cfg.dataset_repo_id, str) and not isinstance(cfg.dataset_root, ListConfig):
         dataset = LeRobotDataset(
             cfg.dataset_repo_id,
             split=split,
@@ -99,9 +99,18 @@ def make_dataset(cfg, split: str = "train", **dataset_kwargs) -> LeRobotDataset 
             video_backend=cfg.video_backend,
             **dataset_kwargs,
         )
-    else:
+    elif isinstance(cfg.dataset_repo_id, ListConfig):
         dataset = MultiLeRobotDataset(
             cfg.dataset_repo_id,
+            split=split,
+            delta_timestamps=cfg.training.get("delta_timestamps"),
+            image_transforms=image_transforms,
+            video_backend=cfg.video_backend,
+            **dataset_kwargs,
+        )
+    elif isinstance(cfg.dataset_root, ListConfig):
+        dataset = MultiLeRobotDataset(
+            [cfg.dataset_repo_id for _ in range(len(cfg.dataset_root))],
             split=split,
             delta_timestamps=cfg.training.get("delta_timestamps"),
             image_transforms=image_transforms,

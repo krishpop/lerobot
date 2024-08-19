@@ -598,7 +598,7 @@ def main(
     stats = compute_stats(lerobot_dataset, 32, 8)
     hf_dataset = hf_dataset.with_format(None)
     hf_dataset.save_to_disk(out_dir)
-    save_meta_data(info, stats, episode_data_index, Path(out_dir) / "meta_data")
+    save_meta_data(ds_info, stats, episode_data_index, Path(out_dir) / "meta_data")
 
     # Save info
     with open(Path(out_dir) / "eval_info.json", "w") as f:
