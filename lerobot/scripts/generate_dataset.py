@@ -542,7 +542,7 @@ def main(
 
     if out_dir is None:
         checkpoint_step = get_checkpoint_step_from_pretrained_policy_path(pretrained_policy_path)
-        out_dir = f"datasets/{hydra_cfg.env.name}/{hydra_cfg.policy.name}/step_{checkpoint_step}/{dt.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+        out_dir = f"datasets/{hydra_cfg.env.name}/{hydra_cfg.policy.name}/step_{checkpoint_step}/{dt.now().strftime('%Y-%m-%d_%H-%M-%S')}/{hydra_cfg.dataset_repo_id}"
 
     # Check device is available
     device = get_safe_torch_device(hydra_cfg.device, log=True)
@@ -588,7 +588,7 @@ def main(
     }
 
     lerobot_dataset = LeRobotDataset.from_preloaded(
-        repo_id="lerobot/pusht",
+        repo_id=hydra_cfg.dataset_repo_id,
         hf_dataset=hf_dataset,
         episode_data_index=episode_data_index,
         info=ds_info,
@@ -597,11 +597,11 @@ def main(
 
     stats = compute_stats(lerobot_dataset, 32, 8)
     hf_dataset = hf_dataset.with_format(None)
-    hf_dataset.save_to_disk(out_dir)
+    hf_dataset.save_to_disk(Path(out_dir) / "train")
     save_meta_data(ds_info, stats, episode_data_index, Path(out_dir) / "meta_data")
 
     # Save info
-    with open(Path(out_dir) / "eval_info.json", "w") as f:
+    with open(Path(out_dir) / "meta_data" / "eval_info.json", "w") as f:
         json.dump(info, f, indent=2)
 
     env.close()
