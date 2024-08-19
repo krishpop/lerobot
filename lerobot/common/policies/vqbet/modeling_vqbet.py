@@ -306,7 +306,7 @@ class VQBeTModel(nn.Module):
             "select_target_actions_indices",
             torch.row_stack([torch.arange(i, i + self.config.action_chunk_size) for i in range(num_tokens)]),
         )
-        self._task_emb = nn.Linear(3, 512, bias=False)
+        self._task_emb = nn.Embedding(3, 512, max_norm=1)       # TODO@bsud: remove hardcoded 3
 
     def forward(self, batch: dict[str, Tensor], rollout: bool) -> Tensor:
         # Input validation.
@@ -335,9 +335,8 @@ class VQBeTModel(nn.Module):
         input_tokens.append(einops.repeat(self.action_token, "1 1 d -> b n d", b=batch_size, n=n_obs_steps))
         # batch should have "task_index" for multitask training and evaluation
         if "task_index" in batch:
-            task_indices = batch["task_index"]
-            task_one_hot = F.one_hot(task_indices, 3).float()   # TODO@bsud: remove hardcoded 3
-            task_embedding = self._task_emb(task_one_hot)
+            task_indices = batch["task_index"].long()
+            task_embedding = self._task_emb(task_indices)
             input_tokens.append(einops.repeat(task_embedding, "b d -> b n d", b=batch_size, n=n_obs_steps))
         # Interleave tokens by stacking and rearranging.
         input_tokens = torch.stack(input_tokens, dim=2)
