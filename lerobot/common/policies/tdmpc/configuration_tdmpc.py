@@ -194,3 +194,23 @@ class TDMPCConfig:
                 raise ValueError("If `n_action_steps > 1`, `use_mpc` must be set to `True`.")
             if self.n_action_steps > self.horizon:
                 raise ValueError("`n_action_steps` must be less than or equal to `horizon`.")
+
+@dataclass
+class TDMPC2Config(TDMPCConfig):
+    """Configuration class for TDMPC2Policy.
+
+    This class extends TDMPCConfig with additional parameters used in modeling_tdmpc2.py.
+    """
+
+    # Additional parameters for TDMPC2
+    vmin: float = -10.0
+    vmax: float = 10.0
+    num_bins: int = 101
+    dropout: float = 0.1
+    task_dim: int = 96 
+    multitask: bool = True
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.bin_size = (self.vmax - self.vmin) / (self.num_bins - 1)
+        self.task_dim = self.task_dim if self.multitask else 0
