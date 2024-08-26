@@ -129,7 +129,7 @@ class TDMPC2Policy(TDMPCPolicy):
         if config is None:
             config = TDMPC2Config()
         self.config = config
-        self.model = TDMPCTOLD(config)
+        self.model = TDMPC2WorldModel(config)
 
         if config.input_normalization_modes is not None:
             self.normalize_inputs = Normalize(
@@ -358,8 +358,8 @@ class TDMPC2Policy(TDMPCPolicy):
         qs = self.model.Q(_zs, action, task_index, return_type='all')
 
         # Compute Q and V value predictions based on the latent rollout.
-        q_preds_ensemble = self.model.Qs(z_preds[:-1], action)  # (ensemble, horizon, batch)
-        v_preds = self.model.V(z_preds[:-1])
+        q_preds_ensemble = self.model.Qs(zs[:-1], action)  # (ensemble, horizon, batch)
+        v_preds = self.model.V(zs[:-1])
         info.update({"Q": q_preds_ensemble.mean().item(), "V": v_preds.mean().item()})
 
         # Compute various targets with stopgrad.
@@ -378,7 +378,7 @@ class TDMPC2Policy(TDMPCPolicy):
         consistency_loss = (
             (
                 temporal_loss_coeffs
-                * F.mse_loss(z_preds[1:], z_targets, reduction="none").mean(dim=-1)
+                * F.mse_loss(zs[1:], _zs, reduction="none").mean(dim=-1)
                 # `z_preds` depends on the current observation and the actions.
                 * ~batch["observation.state_is_pad"][0]
                 * ~batch["action_is_pad"]
@@ -407,7 +407,7 @@ class TDMPC2Policy(TDMPCPolicy):
             (
                 F.mse_loss(
                     q_preds_ensemble,
-                    einops.repeat(q_targets, "t b -> e t b", e=q_preds_ensemble.shape[0]),
+                    einops.repeat(td_targets, "t b -> e t b", e=q_preds_ensemble.shape[0]),
                     reduction="none",
                 ).sum(0)  # sum over ensemble
                 # `q_preds_ensemble` depends on the first observation and the actions.
@@ -526,10 +526,10 @@ class SimNorm(nn.Module):
 	def __repr__(self):
 		return f"SimNorm(dim={self.dim})"
 
-class TDMPC(nn.Module):
-    """Task-Oriented Latent Dynamics (TOLD) model used in TD-MPC."""
+class TDMPC2WorldModel(nn.Module):
+    """Task-Oriented Latent Dynamics (TOLD) model used in TD-MPC2."""
 
-    def __init__(self, config: TDMPCConfig):
+    def __init__(self, config: TDMPC2Config):
         super().__init__()
         self.config = config
         self._encoder = TDMPCObservationEncoder(config)

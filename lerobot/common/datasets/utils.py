@@ -419,3 +419,30 @@ def create_lerobot_dataset_card(tags: list | None = None, text: str | None = Non
     if text is not None:
         card.text += text
     return card
+
+
+def concatenate_multi_lerobot_dataset(multi_dataset):
+    from datasets import concatenate_datasets
+    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+
+    for dataset_idx, dataset in enumerate(multi_dataset._datasets[1:]):
+
+        def update_episode(batch):
+            # Increment each episode index by 512
+            batch = [x + 512 * (dataset_idx + 1) for x in batch]
+            return {"episode_index": batch}
+
+
+        dataset.hf_dataset = dataset.hf_dataset.map(
+            update_episode,
+            input_columns=["episode_index"],
+            batched=True,
+            batch_size=1000
+        )
+
+    hf_dataset = concatenate_datasets([d.hf_dataset for d in multi_dataset._datasets])
+    episode_data_index = calculate_episode_data_index(hf_dataset)
+    dataset = LeRobotDataset.from_preloaded(repo_id=multi_dataset._datasets[0].repo_id, hf_dataset=hf_dataset,
+                                episode_data_index=episode_data_index, info=multi_dataset._datasets[0].info)
+
+    return dataset
