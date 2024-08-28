@@ -370,6 +370,9 @@ class VQBeTModel(nn.Module):
             output = batch["action"][:, self.select_target_actions_indices]
             loss = self.action_head.loss_fn(action_head_output, output, reduction="mean")
             loss["action_head_output"] = action_head_output
+            loss["action_head_output"]["predicted_action_chunk"] = action_head_output["predicted_action"][
+                :, n_obs_steps - 1, :
+            ].reshape(batch_size, self.config.action_chunk_size, -1)
             return action_head_output, loss
 
 

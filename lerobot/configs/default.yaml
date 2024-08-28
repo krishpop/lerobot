@@ -16,6 +16,10 @@ hydra:
 # Note that when resuming a run, the default behavior is to use the configuration from the checkpoint,
 # regardless of what's provided with the training command at the time of resumption.
 resume: false
+# Path to a pretrained policy to load.
+pretrained_policy_path: null
+# Path to a pretrained policy to load a critic from.
+critic_pretrained_policy_path: null
 device: cuda  # cpu
 # `use_amp` determines whether to use Automatic Mixed Precision (AMP) for training and evaluation. With AMP,
 # automatic gradient scaling is used.
@@ -30,6 +34,10 @@ seed: ???
 dataset_repo_id: lerobot/pusht
 dataset_root: null
 video_backend: pyav
+
+distillation:
+  critic_use_advantage: true
+  critic_weight: 100.0
 
 training:
   offline_steps: ???
@@ -86,6 +94,7 @@ training:
   # and add an additional critic loss to the BC-policy loss.
   critic_distillation: false
 
+  custom_transforms: null
   image_transforms:
   # These transforms are all using standard torchvision.transforms.v2
   # You can find out how these transformations affect images here:

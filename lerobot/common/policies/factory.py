@@ -85,7 +85,7 @@ def make_critic(hydra_cfg: DictConfig, policy: Policy):
     if last_pretrained_model_dir is not None and last_pretrained_model_dir.exists():
         critic_cfg = init_hydra_config(str(last_pretrained_model_dir / "config.yaml"))
 
-    critic_policy = make_policy(critic_cfg, pretrained_critic_path, dataset_stats=policy.dataset_stats)
+    critic_policy = make_policy(critic_cfg, last_pretrained_model_dir, dataset_stats=None)
     critic = TDMPCCritic(critic_policy, use_advantage=hydra_cfg.distillation.critic_use_advantage)
     critic.set_normalize_stats(policy)
     return critic

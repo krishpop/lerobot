@@ -759,6 +759,7 @@ class TDMPCCritic(nn.Module):
     def __init__(self, policy: TDMPCPolicy, use_advantage: bool = False):
         super().__init__()
         self.tdmpc_policy = policy
+        self.config = policy.config
         self._Qs = policy.model._Qs
         self._encoder = policy.model._encoder
         self.device = get_device_from_parameters(policy)
@@ -814,7 +815,7 @@ class TDMPCCritic(nn.Module):
         if self._use_image:
             input_dict["observation.image"] = input_dict[self.tdmpc_policy.input_image_key]
         if predicted_action is not None:
-            input_dict["action"] = predicted_action
+            input_dict["action"] = predicted_action.transpose(1, 0)
         else:
             input_dict = self.normalize_targets(input_dict)
         action = input_dict["action"]  # (t, b)
@@ -827,21 +828,25 @@ class TDMPCCritic(nn.Module):
             current_observation[k] = observations[k][0:1]
             next_observations[k] = observations[k][1:]
 
-        z_preds = self.encode(current_observation)
-        q_preds = self.Qs(z_preds, action[:1])
+        z_preds = self.encode(observations)
+        q_preds = self.Qs(z_preds, action)
 
         result = {}
         if self.use_advantage:
             v_preds = self._V(z_preds)
-            exp_advantage = torch.exp(q_preds - v_preds)
-            result["loss"] = -exp_advantage  # Negative so it can be minimized
+            v_preds = einops.rearrange(v_preds, "t b 1 -> 1 t b")
+            exp_advantage = torch.clamp(torch.exp(q_preds - v_preds), min=1e-6, max=100)
+            result["loss"] = -exp_advantage.mean()  # Negative so it can be minimized
             result["exp_advantage"] = exp_advantage
         else:
-            result["loss"] = -q_preds  # Negative so it can be minimized
+            result["loss"] = -q_preds.mean()  # Negative so it can be minimized
 
         result["q_preds"] = q_preds
         result["v_preds"] = v_preds if self.use_advantage else None
 
+        for key in input_dict:
+            if input_dict[key].ndim > 1:
+                input_dict[key] = input_dict[key].transpose(1, 0)
         return result
 
 

@@ -9,6 +9,7 @@ critic_pretrained_policy_path: outputs/train/2024-08-21/13-33-52_pusht_tdmpc_off
 
 training:
   critic_distillation: true
+  offline_steps: 1000000
 
 distillation:
   critic_use_advantage: true

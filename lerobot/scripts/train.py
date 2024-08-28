@@ -180,13 +180,12 @@ def update_policy_with_critic(
         
         # Compute critic loss
         critic_loss = 0
-        predicted_action = output_dict["action_head_output"]["predicted_action"]
+        predicted_action = output_dict["action_head_output"]["predicted_action_chunk"]
         for critic in critics:
             critic.eval()  # Ensure critic is in evaluation mode
             critic_output = critic(batch, predicted_action)
             critic_loss += critic_output["loss"]
         critic_loss /= len(critics)  # Average critic loss
-        
         # Combine policy loss and critic loss
         loss = policy_loss + critic_weight * critic_loss
 
@@ -389,8 +388,8 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     logging.info("make_policy")
     policy = make_policy(
         hydra_cfg=cfg,
-        dataset_stats=offline_dataset.stats if not cfg.resume else None,
-        pretrained_policy_name_or_path=str(logger.last_pretrained_model_dir) if cfg.resume else None,
+        dataset_stats=offline_dataset.stats if not (cfg.resume or cfg.pretrained_policy_path) else None,
+        pretrained_policy_name_or_path=str(logger.last_pretrained_model_dir) if cfg.resume else cfg.pretrained_policy_path,
     )
     if cfg.training.critic_distillation:
         logging.info("make_critic")
@@ -492,14 +491,14 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
         for key in batch:
             batch[key] = batch[key].to(device, non_blocking=True)
 
-        if cfg.training.critic_distillation:
+        if cfg.training.critic_distillation and policy.vqbet.action_head.vqvae_model.discretized.item():
             train_info = update_policy_with_critic(
                 policy,
                 batch,
                 optimizer,
                 cfg.training.grad_clip_norm,
                 grad_scaler=grad_scaler,
-                critic=critic,
+                critics=[critic],
                 critic_weight=cfg.distillation.critic_weight,
                 lr_scheduler=lr_scheduler,
                 use_amp=cfg.use_amp,
