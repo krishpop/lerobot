@@ -38,7 +38,7 @@ from lerobot.common.datasets.sampler import EpisodeAwareSampler
 from lerobot.common.datasets.utils import cycle
 from lerobot.common.envs.factory import make_env
 from lerobot.common.logger import Logger, log_output_dir
-from lerobot.common.policies.factory import make_policy
+from lerobot.common.policies.factory import make_policy, make_critic
 from lerobot.common.policies.policy_protocol import PolicyWithUpdate
 from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.utils.utils import (
@@ -147,6 +147,80 @@ def update_policy(
 
     info = {
         "loss": loss.item(),
+        "grad_norm": float(grad_norm),
+        "lr": optimizer.param_groups[0]["lr"],
+        "update_s": time.perf_counter() - start_time,
+        **{k: v for k, v in output_dict.items() if k != "loss"},
+    }
+    info.update({k: v for k, v in output_dict.items() if k not in info})
+
+    return info
+
+
+def update_policy_with_critic(
+    policy,
+    batch,
+    optimizer,
+    grad_clip_norm,
+    grad_scaler: GradScaler,
+    critics,
+    critic_weight,
+    lr_scheduler=None,
+    use_amp: bool = False,
+    lock=None,
+):
+    """Returns a dictionary of items for logging."""
+    start_time = time.perf_counter()
+    device = get_device_from_parameters(policy)
+    policy.train()
+    with torch.autocast(device_type=device.type) if use_amp else nullcontext():
+        output_dict = policy.forward(batch)
+        # TODO(rcadene): policy.unnormalize_outputs(out_dict)
+        policy_loss = output_dict["loss"]
+        
+        # Compute critic loss
+        critic_loss = 0
+        predicted_action = output_dict["action_head_output"]["predicted_action"]
+        for critic in critics:
+            critic.eval()  # Ensure critic is in evaluation mode
+            critic_output = critic(batch, predicted_action)
+            critic_loss += critic_output["loss"]
+        critic_loss /= len(critics)  # Average critic loss
+        
+        # Combine policy loss and critic loss
+        loss = policy_loss + critic_weight * critic_loss
+
+    grad_scaler.scale(loss).backward()
+
+    # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
+    grad_scaler.unscale_(optimizer)
+
+    grad_norm = torch.nn.utils.clip_grad_norm_(
+        policy.parameters(),
+        grad_clip_norm,
+        error_if_nonfinite=False,
+    )
+
+    # Optimizer's gradients are already unscaled, so scaler.step does not unscale them,
+    # although it still skips optimizer.step() if the gradients contain infs or NaNs.
+    with lock if lock is not None else nullcontext():
+        grad_scaler.step(optimizer)
+    # Updates the scale for next iteration.
+    grad_scaler.update()
+
+    optimizer.zero_grad()
+
+    if lr_scheduler is not None:
+        lr_scheduler.step()
+
+    if isinstance(policy, PolicyWithUpdate):
+        # To possibly update an internal buffer (for instance an Exponential Moving Average like in TDMPC).
+        policy.update()
+
+    info = {
+        "loss": loss.item(),
+        "policy_loss": policy_loss.item(),
+        "critic_loss": critic_loss.item(),
         "grad_norm": float(grad_norm),
         "lr": optimizer.param_groups[0]["lr"],
         "update_s": time.perf_counter() - start_time,
@@ -297,7 +371,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     eval('setattr(torch.backends.cuda.matmul, "allow_tf32", True)')
 
     logging.info("make_dataset")
-    offline_dataset = make_dataset(cfg, root=cfg.dataset_root)
+    offline_dataset = make_dataset(cfg, root=cfg.dataset_root, custom_transforms=cfg.training.custom_transforms)
     if isinstance(offline_dataset, MultiLeRobotDataset):
         logging.info(
             "Multiple datasets were provided. Applied the following index mapping to the provided datasets: "
@@ -318,6 +392,11 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
         dataset_stats=offline_dataset.stats if not cfg.resume else None,
         pretrained_policy_name_or_path=str(logger.last_pretrained_model_dir) if cfg.resume else None,
     )
+    if cfg.training.critic_distillation:
+        logging.info("make_critic")
+        critic = make_critic(hydra_cfg=cfg, policy=policy)
+    else:
+        critic = None
     assert isinstance(policy, nn.Module)
     # Create optimizer and scheduler
     # Temporary hack to move optimizer out of policy
@@ -413,15 +492,28 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
         for key in batch:
             batch[key] = batch[key].to(device, non_blocking=True)
 
-        train_info = update_policy(
-            policy,
-            batch,
-            optimizer,
-            cfg.training.grad_clip_norm,
-            grad_scaler=grad_scaler,
-            lr_scheduler=lr_scheduler,
-            use_amp=cfg.use_amp,
-        )
+        if cfg.training.critic_distillation:
+            train_info = update_policy_with_critic(
+                policy,
+                batch,
+                optimizer,
+                cfg.training.grad_clip_norm,
+                grad_scaler=grad_scaler,
+                critic=critic,
+                critic_weight=cfg.distillation.critic_weight,
+                lr_scheduler=lr_scheduler,
+                use_amp=cfg.use_amp,
+            )
+        else:
+            train_info = update_policy(
+                policy,
+                batch,
+                optimizer,
+                cfg.training.grad_clip_norm,
+                grad_scaler=grad_scaler,
+                lr_scheduler=lr_scheduler,
+                use_amp=cfg.use_amp,
+            )
 
         train_info["dataloading_s"] = dataloading_s
 

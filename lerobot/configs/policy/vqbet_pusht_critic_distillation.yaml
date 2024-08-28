@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+- _self_
+- /policy: vqbet
+
+
+critic_pretrained_policy_path: outputs/train/2024-08-21/13-33-52_pusht_tdmpc_offline+online_exp_diffusion_rollouts_clip_grad_5/
+
+training:
+  critic_distillation: true
+
+distillation:
+  critic_use_advantage: true
+  critic_weight: 1.0

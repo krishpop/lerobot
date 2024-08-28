@@ -81,6 +81,11 @@ training:
   # + eval + environment rendering simultaneously.
   do_online_rollout_async: false
 
+  # Critic distllation. Using critic distillation will load a critic from a pretrained policy, and 
+  # compute the expected advantage or action-value for each predicted action from the BC-policy, 
+  # and add an additional critic loss to the BC-policy loss.
+  critic_distillation: false
+
   image_transforms:
   # These transforms are all using standard torchvision.transforms.v2
   # You can find out how these transformations affect images here:

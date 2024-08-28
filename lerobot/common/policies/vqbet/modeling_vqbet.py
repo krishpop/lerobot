@@ -369,6 +369,7 @@ class VQBeTModel(nn.Module):
         else:
             output = batch["action"][:, self.select_target_actions_indices]
             loss = self.action_head.loss_fn(action_head_output, output, reduction="mean")
+            loss["action_head_output"] = action_head_output
             return action_head_output, loss
 
 

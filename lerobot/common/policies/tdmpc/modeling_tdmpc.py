@@ -35,6 +35,7 @@ import torch.nn as nn
 import torch.nn.functional as F  # noqa: N812
 from huggingface_hub import PyTorchModelHubMixin
 from torch import Tensor
+from typing import Optional
 
 from lerobot.common.policies.normalize import Normalize, Unnormalize
 from lerobot.common.policies.tdmpc.configuration_tdmpc import TDMPCConfig
@@ -700,9 +701,9 @@ class TDMPCObservationEncoder(nn.Module):
 
         if "observation.image" in config.input_shapes:
             self.image_enc_layers = nn.Sequential(
-                nn.Conv2d(config.input_shapes["observation.image"][0], config.image_encoder_hidden_dim, 7, stride=2),
+                nn.Conv2d(config.input_shapes["observation.image"][0], config.image_encoder_hidden_dim, 3, stride=2),
                 nn.ReLU(),
-                nn.Conv2d(config.image_encoder_hidden_dim, config.image_encoder_hidden_dim, 5, stride=2),
+                nn.Conv2d(config.image_encoder_hidden_dim, config.image_encoder_hidden_dim, 3, stride=2),
                 nn.ReLU(),
                 nn.Conv2d(config.image_encoder_hidden_dim, config.image_encoder_hidden_dim, 3, stride=2),
                 nn.ReLU(),
@@ -752,6 +753,96 @@ class TDMPCObservationEncoder(nn.Module):
         if "observation.state" in self.config.input_shapes:
             feat.append(self.state_enc_layers(obs_dict["observation.state"]))
         return torch.stack(feat, dim=0).mean(0)
+
+
+class TDMPCCritic(nn.Module):
+    def __init__(self, policy: TDMPCPolicy, use_advantage: bool = False):
+        super().__init__()
+        self.tdmpc_policy = policy
+        self._Qs = policy.model._Qs
+        self._encoder = policy.model._encoder
+        self.device = get_device_from_parameters(policy)
+        self._use_image = policy._use_image
+        self.normalize_inputs = policy.normalize_inputs
+        self.normalize_targets = policy.normalize_targets
+        self.unnormalize_outputs = policy.unnormalize_outputs
+        self.select_tdmpc_action = policy.select_action
+        self.use_advantage = use_advantage
+        if self.use_advantage:
+            self._V = policy.model._V
+
+    def set_normalize_stats(self, policy):
+        self.normalize_inputs = policy.normalize_inputs
+        self.normalize_targets = policy.normalize_targets
+        self.unnormalize_outputs = policy.unnormalize_outputs
+
+    def encode(self, observations: dict[str, Tensor]) -> Tensor:
+        return self._encoder(observations)
+
+    def Qs(self, z: Tensor, a: Tensor, return_min: bool = False) -> Tensor:  # noqa: N802
+        """Predict state-action value for all of the learned Q functions.
+
+        Args:
+            z: (*, latent_dim) tensor for the current state's latent representation.
+            a: (*, action_dim) tensor for the action to be applied.
+            return_min: Set to true for implementing the detail in App. C of the FOWM paper: randomly select
+                2 of the Qs and return the minimum
+        Returns:
+            (q_ensemble, *) tensor for the value predictions of each learned Q function in the ensemble OR
+            (*,) tensor if return_min=True.
+        """
+        x = torch.cat([z, a], dim=-1)
+        if not return_min:
+            return torch.stack([q(x).squeeze(-1) for q in self._Qs], dim=0)
+        else:
+            if len(self._Qs) > 2:  # noqa: SIM108
+                Qs = [self._Qs[i] for i in np.random.choice(len(self._Qs), size=2)]
+            else:
+                Qs = self._Qs
+            return torch.stack([q(x).squeeze(-1) for q in Qs], dim=0).min(dim=0)[0]
+
+    def forward(self, input_dict: dict[str, Tensor], predicted_action: Optional[Tensor] = None) -> Tensor:
+        """Compute the Q values given an observation and an action."""
+        input_dict = dict(input_dict)  # shallow copy so that adding a key doesn't modify the original
+        for key in input_dict:
+            input_dict[key] = input_dict[key].to(self.device, non_blocking=True)
+        for key in input_dict:
+            if input_dict[key].ndim > 1:
+                input_dict[key] = input_dict[key].transpose(1, 0)
+
+        input_dict = self.normalize_inputs(input_dict)
+        if self._use_image:
+            input_dict["observation.image"] = input_dict[self.tdmpc_policy.input_image_key]
+        if predicted_action is not None:
+            input_dict["action"] = predicted_action
+        else:
+            input_dict = self.normalize_targets(input_dict)
+        action = input_dict["action"]  # (t, b)
+        observations = {k: v for k, v in input_dict.items() if k.startswith("observation.")}
+
+        # Get the current observation for predicting trajectories, and all future observations for use in
+        # the latent consistency loss and TD loss.
+        current_observation, next_observations = {}, {}
+        for k in observations:
+            current_observation[k] = observations[k][0:1]
+            next_observations[k] = observations[k][1:]
+
+        z_preds = self.encode(current_observation)
+        q_preds = self.Qs(z_preds, action[:1])
+
+        result = {}
+        if self.use_advantage:
+            v_preds = self._V(z_preds)
+            exp_advantage = torch.exp(q_preds - v_preds)
+            result["loss"] = -exp_advantage  # Negative so it can be minimized
+            result["exp_advantage"] = exp_advantage
+        else:
+            result["loss"] = -q_preds  # Negative so it can be minimized
+
+        result["q_preds"] = q_preds
+        result["v_preds"] = v_preds if self.use_advantage else None
+
+        return result
 
 
 def random_shifts_aug(x: Tensor, max_random_shift_ratio: float) -> Tensor:

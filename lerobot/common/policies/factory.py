@@ -70,6 +70,27 @@ def get_policy_and_config_classes(name: str) -> tuple[Policy, object]:
         raise NotImplementedError(f"Policy with name {name} is not implemented.")
 
 
+def make_critic(hydra_cfg: DictConfig, policy: Policy):
+    from pathlib import Path
+
+    from lerobot.common.logger import Logger
+    from lerobot.common.policies.tdmpc.modeling_tdmpc import TDMPCCritic
+    from lerobot.common.utils.utils import init_hydra_config
+
+    pretrained_critic_path = hydra_cfg.critic_pretrained_policy_path
+    assert Path(pretrained_critic_path).exists(), f"Pretrained critic path {pretrained_critic_path} does not exist"
+    last_pretrained_model_dir = Logger.get_last_pretrained_model_dir(pretrained_critic_path)
+    assert last_pretrained_model_dir.exists(), f"Last pretrained model dir {last_pretrained_model_dir} does not exist"
+
+    if last_pretrained_model_dir is not None and last_pretrained_model_dir.exists():
+        critic_cfg = init_hydra_config(str(last_pretrained_model_dir / "config.yaml"))
+
+    critic_policy = make_policy(critic_cfg, pretrained_critic_path, dataset_stats=policy.dataset_stats)
+    critic = TDMPCCritic(critic_policy, use_advantage=hydra_cfg.distillation.critic_use_advantage)
+    critic.set_normalize_stats(policy)
+    return critic
+
+
 def make_policy(
     hydra_cfg: DictConfig, pretrained_policy_name_or_path: str | None = None, dataset_stats=None
 ) -> Policy:
