@@ -689,7 +689,7 @@ class TDMPC2WorldModel(nn.Module):
 class TDMPCObservationEncoder(nn.Module):
     """Encode image and/or state vector observations."""
 
-    def __init__(self, config: TDMPCConfig):
+    def __init__(self, config: TDMPC2Config):
         """
         Creates encoders for pixel and/or state modalities.
         TODO(alexander-soare): The original work allows for multiple images by concatenating them along the

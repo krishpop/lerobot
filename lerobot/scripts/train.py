@@ -50,6 +50,7 @@ from lerobot.common.utils.utils import (
 )
 from lerobot.scripts.eval import eval_policy
 
+from dact.utils.dataset_utils import create_custom_transforms
 
 def make_optimizer_and_scheduler(cfg, policy):
     if cfg.policy.name == "act":
@@ -370,7 +371,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     eval('setattr(torch.backends.cuda.matmul, "allow_tf32", True)')
 
     logging.info("make_dataset")
-    offline_dataset = make_dataset(cfg, root=cfg.dataset_root, custom_transforms=cfg.training.custom_transforms)
+    offline_dataset = make_dataset(cfg, root=cfg.dataset_root, custom_transforms=create_custom_transforms(cfg.training.custom_transforms))
     if isinstance(offline_dataset, MultiLeRobotDataset):
         logging.info(
             "Multiple datasets were provided. Applied the following index mapping to the provided datasets: "
@@ -491,7 +492,17 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
         for key in batch:
             batch[key] = batch[key].to(device, non_blocking=True)
 
-        if cfg.training.critic_distillation and policy.vqbet.action_head.vqvae_model.discretized.item():
+        distill_with_critic = cfg.training.critic_distillation and (
+            policy.name != "vqbet"
+            or cfg.distillation.discretize_with_critic
+            or policy.vqbet.action_head.vqvae_model.discretized.item()
+        )
+        if cfg.distillation.discretize_with_critic and not policy.vqbet.action_head.vqvae_model.discretized.item():
+            critic_weight = min(cfg.distillation.critic_weight * .01, 1)
+        else:
+            critic_weight = cfg.distillation.critic_weight
+
+        if distill_with_critic:
             train_info = update_policy_with_critic(
                 policy,
                 batch,
@@ -499,7 +510,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
                 cfg.training.grad_clip_norm,
                 grad_scaler=grad_scaler,
                 critics=[critic],
-                critic_weight=cfg.distillation.critic_weight,
+                critic_weight=critic_weight,
                 lr_scheduler=lr_scheduler,
                 use_amp=cfg.use_amp,
             )
