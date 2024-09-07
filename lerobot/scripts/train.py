@@ -90,6 +90,16 @@ def make_optimizer_and_scheduler(cfg, policy):
     elif policy.name == "tdmpc":
         optimizer = torch.optim.Adam(policy.parameters(), cfg.training.lr)
         lr_scheduler = None
+    elif policy.name == "tdmpc2":
+        optimizer = torch.optim.Adam([
+            {'params': policy.model._encoder.parameters(), 'lr': cfg.training.lr*cfg.policy.enc_lr_scale},
+            {'params': policy.model._dynamics.parameters(), 'lr': cfg.training.lr},
+            {'params': policy.model._reward.parameters(), 'lr': cfg.training.lr},
+            {'params': policy.model._Qs.parameters(), 'lr': cfg.training.lr},
+            {'params': policy.model._pi.parameters(), 'lr': cfg.training.lr},
+            {'params': policy.model._task_emb.parameters() if cfg.policy.multitask else []}
+        ], lr=cfg.training.lr)
+        lr_scheduler = None
     elif cfg.policy.name == "vqbet":
         from lerobot.common.policies.vqbet.modeling_vqbet import VQBeTOptimizer, VQBeTScheduler
 

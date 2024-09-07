@@ -28,6 +28,7 @@ import logging
 from collections import deque
 from functools import partial
 from typing import Callable
+from copy import deepcopy
 
 import einops
 import numpy as np
@@ -36,10 +37,47 @@ import torch.nn as nn
 import torch.nn.functional as F  # noqa: N812
 from torch import Tensor
 
+from huggingface_hub import PyTorchModelHubMixin
 from lerobot.common.policies.normalize import Normalize, Unnormalize
 from lerobot.common.policies.tdmpc.configuration_tdmpc import TDMPC2Config
-from lerobot.common.policies.tdmpc.modeling_tdmpc import TDMPCTOLD, TDMPCPolicy
+from lerobot.common.policies.tdmpc.modeling_tdmpc import random_shifts_aug, flatten_forward_unflatten
 from lerobot.common.policies.utils import get_device_from_parameters, populate_queues
+
+
+@torch.jit.script
+def log_std(x, low, dif):
+	return low + 0.5 * dif * (torch.tanh(x) + 1)
+
+
+@torch.jit.script
+def _gaussian_residual(eps, log_std):
+	return -0.5 * eps.pow(2) - log_std
+
+
+@torch.jit.script
+def _gaussian_logprob(residual):
+	return residual - 0.5 * torch.log(2 * torch.pi)
+
+
+def gaussian_logprob(eps, log_std, size=None):
+	"""Compute Gaussian log probability."""
+	residual = _gaussian_residual(eps, log_std).sum(-1, keepdim=True)
+	if size is None:
+		size = eps.size(-1)
+	return _gaussian_logprob(residual) * size
+
+
+@torch.jit.script
+def _squash(pi):
+	return torch.log(F.relu(1 - pi.pow(2)) + 1e-6)
+
+
+def squash(mu, pi, log_pi):
+	"""Apply squashing function."""
+	mu = torch.tanh(mu)
+	pi = torch.tanh(pi)
+	log_pi -= _squash(pi).sum(-1, keepdim=True)
+	return mu, pi, log_pi
 
 
 @torch.jit.script
@@ -58,6 +96,13 @@ def symexp(x):
 	Adapted from https://github.com/danijar/dreamerv3.
 	"""
 	return torch.sign(x) * (torch.exp(torch.abs(x)) - 1)
+
+
+def soft_ce(pred, target, cfg):
+	"""Computes the cross entropy loss between predictions and soft targets."""
+	pred = F.log_softmax(pred, dim=-1)
+	target = two_hot(target, cfg)
+	return -(target * pred).sum(-1, keepdim=True)
 
 
 def two_hot(x, cfg):
@@ -92,11 +137,36 @@ def two_hot_inv(x, cfg):
 	return symexp(x)
 
 
-class TDMPC2Policy(TDMPCPolicy):
+class SimNorm(nn.Module):
+	"""
+	Simplicial normalization.
+	Adapted from https://arxiv.org/abs/2204.00616.
+	"""
+	
+	def __init__(self, cfg):
+		super().__init__()
+		self.dim = cfg.simnorm_dim
+	
+	def forward(self, x):
+		shp = x.shape
+		x = x.view(*shp[:-1], -1, self.dim)
+		x = F.softmax(x, dim=-1)
+		return x.view(*shp)
+		
+	def __repr__(self):
+		return f"SimNorm(dim={self.dim})"
+
+
+class TDMPC2Policy(nn.Module,
+    PyTorchModelHubMixin,
+    library_name="lerobot",
+    repo_url="https://github.com/huggingface/lerobot",
+    tags=["robotics", "tdmpc2"],
+):
     """Implementation of TD-MPC2 learning + inference.
     """
 
-    name = "tdmpc"
+    name = "tdmpc2"
 
     def __init__(
         self, config: TDMPC2Config | None = None, dataset_stats: dict[str, dict[str, Tensor]] | None = None
@@ -116,8 +186,8 @@ class TDMPC2Policy(TDMPCPolicy):
             - Evaluation of pretrained weights created with the original FOWM code
               (https://github.com/fyhMer/fowm) works as expected. To be precise: we trained and evaluated a
               model with the FOWM code for the xarm_lift_medium_replay dataset. We ported the weights across
-              to LeRobot, and were able to evaluate with the same success metric. BUT, we had to use inter-
-              process communication to use the xarm environment from FOWM. This is because our xarm
+             to LeRobot, and were able to evaluate with the same success metric. BUT, we had to use inter-
+             process communication to use the xarm environment from FOWM. This is because our xarm
               environment uses newer dependencies and does not match the environment in FOWM. See
               https://github.com/huggingface/lerobot/pull/103 for implementation details.
             - We have NOT checked that training on LeRobot reproduces SOTA results. This is a TODO.
@@ -148,8 +218,36 @@ class TDMPC2Policy(TDMPCPolicy):
         # Note: This check is covered in the post-init of the config but have a sanity check just in case.
         assert len(image_keys) == 1
         self.input_image_key = image_keys[0]
+        self._use_image = False
+        self._use_env_state = False
+        if len(image_keys) > 0:
+            assert len(image_keys) == 1
+            self._use_image = True
+            self.input_image_key = image_keys[0]
+        if "observation.environment_state" in config.input_shapes:
+            self._use_env_state = True
+
+        self.discount = torch.tensor(
+			[self._get_discount(ep_len) for ep_len in config.episode_lengths], device='cuda'
+		) if config.multitask else torch.tensor(self._get_discount(config.episode_length), device='cuda')
 
         self.reset()
+
+
+    def _get_discount(self, episode_length): 
+        """
+		Returns discount factor for a given episode length.
+		Simple heuristic that scales discount linearly with episode length.
+		Default values should work well for most tasks, but can be changed as needed.
+
+		Args:
+			episode_length (int): Length of the episode. Assumes episodes are of fixed length.
+
+		Returns:
+			float: Discount factor for the task.
+		""" 
+        frac = episode_length/self.config.discount_denom
+        return min(max((frac-1)/(frac), self.config.discount_min), self.config.discount_max)
 
     def reset(self):
         """
@@ -161,12 +259,16 @@ class TDMPC2Policy(TDMPCPolicy):
             "observation.state": deque(maxlen=1),
             "action": deque(maxlen=self.config.n_action_repeats),
         }
+        if self._use_image:
+            self._queues["observation.image"] = deque(maxlen=1)
+        if self._use_env_state:
+            self._queues["observation.environment_state"] = deque(maxlen=1)
         # Previous mean obtained from the cross-entropy method (CEM) used during MPC. It is used to warm start
         # CEM for the next step.
         self._prev_mean: torch.Tensor | None = None
 
     @torch.no_grad()
-    def select_action(self, batch: dict[str, Tensor]) -> Tensor:
+    def select_action(self, batch: dict[str, Tensor], t0=False, eval_mode=False, task=None) -> Tensor:
         """Select a single action given environment observations."""
         batch = self.normalize_inputs(batch)
         batch["observation.image"] = batch[self.input_image_key]
@@ -182,24 +284,23 @@ class TDMPC2Policy(TDMPCPolicy):
                 assert batch[key].shape[1] == 1
                 batch[key] = batch[key][:, 0]
 
-            # NOTE: Order of observations matters here.
-            z = self.model.encode({k: batch[k] for k in ["observation.image", "observation.state"]})
+            # NOTE: Order of observations matters here. 
+            encode_keys = ["observation.image", "observation.state"]
+            task_index = batch.get("task_index", torch.ones(batch["action"].shape[1]))
+            z = self.model.encode({k: batch[k] for k in encode_keys}, task_index)
             if self.config.use_mpc:
-                batch_size = batch["observation.image"].shape[0]
-                # Batch processing is not handled in MPC mode, so process the batch in a loop.
-                action = []  # will be a batch of actions for one step
-                for i in range(batch_size):
-                    # Note: self.plan does not handle batches, hence the squeeze.
-                    action.append(self.plan(z[i]))
-                action = torch.stack(action)
+                action = self.plan(z, t0=t0, eval_mode=eval_mode, task=task)
             else:
-                # Plan with the policy (π) alone.
-                action = self.model.pi(z)
+                a_mu, a_samp, _, _ = self.model.pi(z, task)
+                action = a_mu if eval_mode else a_samp
 
             action = self.unnormalize_outputs({"action": action.clamp(-1, 1)})["action"]
 
-            for _ in range(self.config.n_action_repeats):
-                self._queues["action"].append(action)
+            if self.config.n_action_repeats > 1:
+                for _ in range(self.config.n_action_repeats):
+                    self._queues["action"].append(action[0])
+            else:
+                self._queues["action"].extend(action[: self.config.n_action_steps])
 
         action = self._queues["action"].popleft()
         return action
@@ -304,6 +405,24 @@ class TDMPC2Policy(TDMPCPolicy):
             discount *= self.config.discount
         return G + discount * self.model.Q(z, self.model.pi(z)[1], return_type='avg')
 
+    @torch.no_grad()
+    def _td_target(self, next_z, reward, task):
+        """
+        Compute the TD-target from a reward and the observation at the following time step.
+		
+		Args:
+			next_z (torch.Tensor): Latent state at the following time step.
+			reward (torch.Tensor): Reward at the current time step.
+			task (torch.Tensor): Task index (only used for multi-task experiments).
+		
+		Returns:
+			torch.Tensor: TD-target.
+		"""
+        pi = self.model.pi(next_z, task)[1]
+        discount = self.discount[task].unsqueeze(-1) if self.config.multitask else self.discount
+        qs = self.model.Qs(next_z, pi, task, return_type='min', target=True)
+        return reward + discount * qs
+
     def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
         """Run the batch through the model and compute the loss."""
         device = get_device_from_parameters(self)
@@ -325,7 +444,7 @@ class TDMPC2Policy(TDMPCPolicy):
         observations = {k: v for k, v in batch.items() if k.startswith("observation.")}
 
         # Apply random image augmentationse
-        if self.config.max_random_shift_ratio > 0:
+        if self._use_image and self.config.max_random_shift_ratio > 0:
             observations["observation.image"] = flatten_forward_unflatten(
                 partial(random_shifts_aug, max_random_shift_ratio=self.config.max_random_shift_ratio),
                 observations["observation.image"],
@@ -344,23 +463,17 @@ class TDMPC2Policy(TDMPCPolicy):
         # gives us a next `z`.
         batch_size = batch["index"].shape[0]
         zs = torch.empty(horizon + 1, batch_size, self.config.latent_dim, device=device)
-        zs[0] = z = self.model.encode(current_observation)
-        reward_preds = torch.empty_like(reward, device=device)
-        consistency_loss = 0
+        zs[0] = self.model.encode(current_observation, task_index)
+        reward_preds = torch.empty(horizon, batch_size, self.config.num_bins, device=device)
         for t in range(horizon):
-            z = self.model.next(z, action[t], task_index)
-            reward_preds[t] = self.model.reward(z, action[t], task_index)
-            consistency_loss += F.mse_loss(z, self.model.encode(next_observations[t], task_index)) * self.config.rho**t
-            zs[t+1] = z
+            zs[t + 1], reward_preds[t] = self.model.latent_dynamics_and_reward(zs[t], action[t], task_index)
 
         # Compute Q and V value predictions based on the latent rollout.
         _zs = zs[:-1]
-        qs = self.model.Q(_zs, action, task_index, return_type='all')
 
         # Compute Q and V value predictions based on the latent rollout.
-        q_preds_ensemble = self.model.Qs(zs[:-1], action)  # (ensemble, horizon, batch)
-        v_preds = self.model.V(zs[:-1])
-        info.update({"Q": q_preds_ensemble.mean().item(), "V": v_preds.mean().item()})
+        q_preds_ensemble = self.model.Qs(_zs, action, task_index, return_type="all")  # (ensemble, horizon, batch)
+        info.update({"Q": q_preds_ensemble.mean().item()})
 
         # Compute various targets with stopgrad.
         with torch.no_grad():
@@ -378,7 +491,7 @@ class TDMPC2Policy(TDMPCPolicy):
         consistency_loss = (
             (
                 temporal_loss_coeffs
-                * F.mse_loss(zs[1:], _zs, reduction="none").mean(dim=-1)
+                * F.mse_loss(zs[1:], next_z, reduction="none").mean(dim=-1)
                 # `z_preds` depends on the current observation and the actions.
                 * ~batch["observation.state_is_pad"][0]
                 * ~batch["action_is_pad"]
@@ -393,7 +506,7 @@ class TDMPC2Policy(TDMPCPolicy):
         reward_loss = (
             (
                 temporal_loss_coeffs
-                * F.mse_loss(reward_preds, reward, reduction="none")
+                * soft_ce(reward_preds, reward.unsqueeze(-1), self.config)
                 * ~batch["next.reward_is_pad"]
                 # `reward_preds` depends on the current observation and the actions.
                 * ~batch["observation.state_is_pad"][0]
@@ -405,11 +518,8 @@ class TDMPC2Policy(TDMPCPolicy):
         # Compute state-action value loss (TD loss) for all of the Q functions in the ensemble.
         q_value_loss = (
             (
-                F.mse_loss(
-                    q_preds_ensemble,
-                    einops.repeat(td_targets, "t b -> e t b", e=q_preds_ensemble.shape[0]),
-                    reduction="none",
-                ).sum(0)  # sum over ensemble
+                temporal_loss_coeffs
+                * soft_ce(q_preds_ensemble, td_targets.unsqueeze(0).unsqueeze(-1), self.config).mean(dim=0)
                 # `q_preds_ensemble` depends on the first observation and the actions.
                 * ~batch["observation.state_is_pad"][0]
                 * ~batch["action_is_pad"]
@@ -420,38 +530,13 @@ class TDMPC2Policy(TDMPCPolicy):
             .sum(0)
             .mean()
         )
-        # Compute state value loss as in eqn 3 of FOWM.
-        diff = v_targets - v_preds
-        # Expectile loss penalizes:
-        #   - `v_preds <  v_targets` with weighting `expectile_weight`
-        #   - `v_preds >= v_targets` with weighting `1 - expectile_weight`
-        raw_v_value_loss = torch.where(
-            diff > 0, self.config.expectile_weight, (1 - self.config.expectile_weight)
-        ) * (diff**2)
-        v_value_loss = (
-            (
-                temporal_loss_coeffs
-                * raw_v_value_loss
-                # `v_targets` depends on the first observation and the actions, as does `v_preds`.
-                * ~batch["observation.state_is_pad"][0]
-                * ~batch["action_is_pad"]
-            )
-            .sum(0)
-            .mean()
-        )
 
         # Calculate the advantage weighted regression loss for π as detailed in FOWM 3.1.
         # We won't need these gradients again so detach.
-        z_preds = z_preds.detach()
-        # Use stopgrad for the advantage calculation.
-        with torch.no_grad():
-            advantage = self.model_target.Qs(z_preds[:-1], action, return_min=True) - self.model.V(
-                z_preds[:-1]
-            )
-            info["advantage"] = advantage[0]
-            # (t, b)
-            exp_advantage = torch.clamp(torch.exp(advantage * self.config.advantage_scaling), max=100.0)
+        z_preds = zs.detach()
+
         action_preds = self.model.pi(z_preds[:-1])  # (t, b, a)
+        q_preds = self.model.Q(z_preds[:-1], action_preds, return_type='avg')
         # Calculate the MSE between the actions and the action predictions.
         # Note: FOWM's original code calculates the log probability (wrt to a unit standard deviation
         # gaussian) and sums over the action dimension. Computing the log probability amounts to multiplying
@@ -463,20 +548,24 @@ class TDMPC2Policy(TDMPCPolicy):
         # other losses.
         # TODO(alexander-soare): Take the sum over the temporal dimension and check that training still works
         # as well as expected.
-        pi_loss = (
-            exp_advantage
-            * mse
-            * temporal_loss_coeffs
-            # `action_preds` depends on the first observation and the actions.
-            * ~batch["observation.state_is_pad"][0]
-            * ~batch["action_is_pad"]
-        ).mean()
+
+        if self.config.pi_loss == "mse":
+            pi_loss = (
+                mse
+                * temporal_loss_coeffs
+                # `action_preds` depends on the first observation and the actions.
+                * ~batch["observation.state_is_pad"][0]
+                * ~batch["action_is_pad"]
+            ).mean()
+        elif self.config.pi_loss == "soft":
+            pi_loss = (
+
+            )
 
         loss = (
             self.config.consistency_coeff * consistency_loss
             + self.config.reward_coeff * reward_loss
             + self.config.value_coeff * q_value_loss
-            + self.config.value_coeff * v_value_loss
             + self.config.pi_coeff * pi_loss
         )
 
@@ -485,7 +574,6 @@ class TDMPC2Policy(TDMPCPolicy):
                 "consistency_loss": consistency_loss.item(),
                 "reward_loss": reward_loss.item(),
                 "Q_value_loss": q_value_loss.item(),
-                "V_value_loss": v_value_loss.item(),
                 "pi_loss": pi_loss.item(),
                 "loss": loss,
                 "sum_loss": loss.item() * self.config.horizon,
@@ -504,27 +592,7 @@ class TDMPC2Policy(TDMPCPolicy):
         # Note a minor variation with respect to the original FOWM code. Here they do this based on an EMA
         # update frequency parameter which is set to 2 (every 2 steps an update is done). To simplify the code
         # we update every step and adjust the decay parameter `alpha` accordingly (0.99 -> 0.995)
-        update_ema_parameters(self.model_target, self.model, self.config.target_model_momentum)
 
-
-class SimNorm(nn.Module):
-	"""
-	Simplicial normalization.
-	Adapted from https://arxiv.org/abs/2204.00616.
-	"""
-	
-	def __init__(self, cfg):
-		super().__init__()
-		self.dim = cfg.simnorm_dim
-	
-	def forward(self, x):
-		shp = x.shape
-		x = x.view(*shp[:-1], -1, self.dim)
-		x = F.softmax(x, dim=-1)
-		return x.view(*shp)
-		
-	def __repr__(self):
-		return f"SimNorm(dim={self.dim})"
 
 class TDMPC2WorldModel(nn.Module):
     """Task-Oriented Latent Dynamics (TOLD) model used in TD-MPC2."""
@@ -532,6 +600,8 @@ class TDMPC2WorldModel(nn.Module):
     def __init__(self, config: TDMPC2Config):
         super().__init__()
         self.config = config
+        if self.config.multitask:
+            self._task_emb = nn.Embedding(self.config.num_tasks, self.config.task_dim, max_norm=1)
         self._encoder = TDMPCObservationEncoder(config)
         self._dynamics = nn.Sequential(
             nn.Linear(config.latent_dim + config.output_shapes["action"][0] + config.task_dim, config.mlp_dim),
@@ -545,7 +615,7 @@ class TDMPC2WorldModel(nn.Module):
             SimNorm(config),
         )
         self._reward = nn.Sequential(
-            nn.Linear(config.latent_dim + config.output_shapes["action"][0], config.mlp_dim),
+            nn.Linear(config.latent_dim + config.output_shapes["action"][0] + config.task_dim, config.mlp_dim),
             nn.LayerNorm(config.mlp_dim),
             nn.Mish(),
             nn.Linear(config.mlp_dim, config.mlp_dim),
@@ -554,18 +624,21 @@ class TDMPC2WorldModel(nn.Module):
             nn.Linear(config.mlp_dim, max(config.num_bins, 1)),
         )
         self._pi = nn.Sequential(
-            nn.Linear(config.latent_dim, config.mlp_dim),
+            nn.Linear(config.latent_dim + config.task_dim, config.mlp_dim),
             nn.LayerNorm(config.mlp_dim),
             nn.Mish(),
             nn.Linear(config.mlp_dim, config.mlp_dim),
             nn.LayerNorm(config.mlp_dim),
             nn.Mish(),
-            nn.Linear(config.mlp_dim, config.output_shapes["action"][0]),
+            nn.Linear(config.mlp_dim, 2 * config.output_shapes["action"][0]),
         )
+        self.register_buffer("log_std_min", torch.tensor(config.log_std_min))
+        self.register_buffer("log_std_dif", torch.tensor(config.log_std_max - config.log_std_min))
+
         self._Qs = nn.ModuleList(
             [
                 nn.Sequential(
-                    nn.Linear(config.latent_dim + config.output_shapes["action"][0], config.mlp_dim),
+                    nn.Linear(config.latent_dim + config.output_shapes["action"][0] + config.task_dim, config.mlp_dim),
                     nn.Dropout(config.dropout, inplace=True),
                     nn.LayerNorm(config.mlp_dim),
                     nn.Tanh(),
@@ -577,6 +650,8 @@ class TDMPC2WorldModel(nn.Module):
             ]
         )
         self._init_weights()
+        self._reward[-1].weight.data.fill_(0)
+        self._target_Qs = deepcopy(self._Qs).requires_grad_(False)
 
     def _init_weights(self):
         """Initialize model weights.
@@ -605,11 +680,14 @@ class TDMPC2WorldModel(nn.Module):
             nn.init.zeros_(m[-1].weight)
             nn.init.zeros_(m[-1].bias)  # this has already been done, but keep this line here for good measure
 
-    def encode(self, obs: dict[str, Tensor]) -> Tensor:
+    def encode(self, obs: dict[str, Tensor], task_index: Tensor) -> Tensor:
         """Encodes an observation into its latent representation."""
-        return self._encoder(obs)
+        if self.config.multitask:
+            obs = self.task_emb(obs, task_index)
+        encoded_feat = self._encoder(obs)
+        return encoded_feat
 
-    def latent_dynamics_and_reward(self, z: Tensor, a: Tensor) -> tuple[Tensor, Tensor]:
+    def latent_dynamics_and_reward(self, z: Tensor, a: Tensor, task_index: Tensor) -> tuple[Tensor, Tensor]:
         """Predict the next state's latent representation and the reward given a current latent and action.
 
         Args:
@@ -620,10 +698,9 @@ class TDMPC2WorldModel(nn.Module):
                 - (*, latent_dim) tensor for the next state's latent representation.
                 - (*,) tensor for the estimated reward.
         """
-        x = torch.cat([z, a], dim=-1)
-        return self._dynamics(x), self._reward(x).squeeze(-1)
+        return self.latent_dynamics(z, a, task_index), self.reward(z, a, task_index).squeeze(-1)
 
-    def latent_dynamics(self, z: Tensor, a: Tensor) -> Tensor:
+    def latent_dynamics(self, z: Tensor, a: Tensor, task_index: Tensor) -> Tensor:
         """Predict the next state's latent representation given a current latent and action.
 
         Args:
@@ -632,10 +709,27 @@ class TDMPC2WorldModel(nn.Module):
         Returns:
             (*, latent_dim) tensor for the next state's latent representation.
         """
+        if self.config.multitask:
+            z = self.task_emb(z, task_index)
         x = torch.cat([z, a], dim=-1)
         return self._dynamics(x)
 
-    def pi(self, z: Tensor, std: float = 0.0) -> Tensor:
+    def reward(self, z: Tensor, a: Tensor, task_index: Tensor) -> Tensor:
+        """Predict the reward given a current latent and action.
+
+        Args:
+            z: (*, latent_dim) tensor for the current state's latent representation.
+            a: (*, action_dim) tensor for the action to be applied.
+            task_index: (*,) tensor for the task index.
+        Returns:
+            (*,) tensor for the estimated reward.
+        """
+        if self.config.multitask:
+            z = self.task_emb(z, task_index)
+        x = torch.cat([z, a], dim=-1)
+        return self._reward(x).squeeze(-1)
+
+    def pi(self, z: Tensor, task_index: Tensor) -> Tensor:
         """Samples an action from the learned policy.
 
         The policy can also have added (truncated) Gaussian noise injected for encouraging exploration when
@@ -643,47 +737,72 @@ class TDMPC2WorldModel(nn.Module):
 
         Args:
             z: (*, latent_dim) tensor for the current state's latent representation.
-            std: The standard deviation of the injected noise.
+            task_index: (*,) tensor for the task index.
         Returns:
             (*, action_dim) tensor for the sampled action.
         """
-        action = torch.tanh(self._pi(z))
-        if std > 0:
-            std = torch.ones_like(action) * std
-            action += torch.randn_like(action) * std
-        return action
+        if self.config.multitask:
+            z = self.task_emb(z, task_index)
+        mu, log_std_x = self._pi(z).chunk(2, dim=-1)
+        log_std_x = log_std(log_std_x, self.log_std_min, self.log_std_dif) 
+        eps = torch.randn_like(mu) 
+        log_pi = gaussian_logprob(eps, log_std_x, size=self.config.output_shapes["action"][0]) 
+        action = mu + eps * log_std_x.exp() 
+        mu, action, log_pi = squash(mu, action, log_pi) 
+        return mu, action, log_pi, log_std_x
 
-    def V(self, z: Tensor) -> Tensor:  # noqa: N802
-        """Predict state value (V).
-
-        Args:
-            z: (*, latent_dim) tensor for the current state's latent representation.
-        Returns:
-            (*,) tensor of estimated state values.
-        """
-        return self._V(z).squeeze(-1)
-
-    def Qs(self, z: Tensor, a: Tensor, return_min: bool = False) -> Tensor:  # noqa: N802
+    def Qs(self, z: Tensor, a: Tensor, task_index: Tensor, return_type: str = 'all', target=False) -> Tensor:  # noqa: N802
         """Predict state-action value for all of the learned Q functions.
 
         Args:
             z: (*, latent_dim) tensor for the current state's latent representation.
             a: (*, action_dim) tensor for the action to be applied.
-            return_min: Set to true for implementing the detail in App. C of the FOWM paper: randomly select
-                2 of the Qs and return the minimum
+            task_index: (*,) tensor for the task index.
+            return_type: can be one of [`min`, `avg`, `all`]:
+			- `min`: return the minimum of two randomly subsampled Q-values.
+			- `avg`: return the average of two randomly subsampled Q-values.
+			- `all`: return all Q-values.
         Returns:
             (q_ensemble, *) tensor for the value predictions of each learned Q function in the ensemble OR
             (*,) tensor if return_min=True.
         """
-        x = torch.cat([z, a], dim=-1)
-        if not return_min:
-            return torch.stack([q(x).squeeze(-1) for q in self._Qs], dim=0)
+        assert return_type in {'min', 'avg', 'all'}
+        if self.config.multitask:
+            z = self.task_emb(z, task_index)
+        x = torch.cat([z, a], dim=-1) 
+        qs = self._Qs if not target else self._target_Qs
+        out = torch.stack([q(x).squeeze(-1) for q in qs], dim=0)
+        if return_type == 'all':
+            return out
         else:
-            if len(self._Qs) > 2:  # noqa: SIM108
-                Qs = [self._Qs[i] for i in np.random.choice(len(self._Qs), size=2)]
+            if self.config.q_ensemble_size > 2:  # noqa: SIM108
+                out = [out[i] for i in np.random.choice(len(self._Qs), size=2)]
+            q1, q2 = two_hot_inv(out[0], self.config), two_hot_inv(out[1], self.config)
+            if return_type == 'min':
+                return torch.min(q1, q2)
             else:
-                Qs = self._Qs
-            return torch.stack([q(x).squeeze(-1) for q in Qs], dim=0).min(dim=0)[0]
+                return torch.stack([q(x).squeeze(-1) for q in qs], dim=0).mean(dim=0)
+
+    def task_emb(self, z: Tensor | dict[str, Tensor], task_index: Tensor) -> Tensor:
+        if isinstance(task_index, int):
+            task_index = torch.tensor([task_index], device=z.device) 
+        if isinstance(z, dict): 
+            for k in z:
+                z[k] = self.task_emb(z[k], task_index)
+            return z
+        else:
+            emb = self._task_emb(task_index.long())
+            if z.ndim == 5:
+                emb = emb.view(1, emb.shape[0], 1, emb.shape[1], 1).repeat(z.shape[0], 1, 1, 1, z.shape[-1])
+                return torch.cat([z, emb], dim=2) 
+            elif z.ndim == 4:
+                emb = emb.view(emb.shape[0], 1, emb.shape[1], 1).repeat(1, 1, 1, z.shape[-1])
+                return torch.cat([z, emb], dim=1)
+            elif z.ndim == 3:
+                emb = emb.unsqueeze(0).repeat(z.shape[0], 1, 1)
+            elif emb.shape[0] == 1:
+                emb = emb.repeat(z.shape[0], 1)
+            return torch.cat([z, emb], dim=-1)
 
 
 class TDMPCObservationEncoder(nn.Module):
@@ -701,7 +820,7 @@ class TDMPCObservationEncoder(nn.Module):
         if "observation.image" in config.input_shapes:
             self.image_enc_layers = nn.Sequential(
                 nn.Conv2d(
-                    config.input_shapes["observation.image"][0], config.image_encoder_hidden_dim, 7, stride=2
+                    config.input_shapes["observation.image"][0] + config.task_dim, config.image_encoder_hidden_dim, 7, stride=2
                 ),
                 nn.ReLU(),
                 nn.Conv2d(config.image_encoder_hidden_dim, config.image_encoder_hidden_dim, 3, stride=2),
@@ -724,7 +843,7 @@ class TDMPCObservationEncoder(nn.Module):
             )
         if "observation.state" in config.input_shapes:
             self.state_enc_layers = nn.Sequential(
-                nn.Linear(config.input_shapes["observation.state"][0], config.state_encoder_hidden_dim),
+                nn.Linear(config.input_shapes["observation.state"][0] + config.task_dim, config.state_encoder_hidden_dim),
                 nn.ELU(),
                 nn.Linear(config.state_encoder_hidden_dim, config.latent_dim),
                 nn.LayerNorm(config.latent_dim),
@@ -742,73 +861,5 @@ class TDMPCObservationEncoder(nn.Module):
             feat.append(flatten_forward_unflatten(self.image_enc_layers, obs_dict["observation.image"]))
         if "observation.state" in self.config.input_shapes:
             feat.append(self.state_enc_layers(obs_dict["observation.state"]))
-        return torch.stack(feat, dim=0).mean(0)
-
-
-def random_shifts_aug(x: Tensor, max_random_shift_ratio: float) -> Tensor:
-    """Randomly shifts images horizontally and vertically.
-
-    Adapted from https://github.com/facebookresearch/drqv2
-    """
-    b, _, h, w = x.size()
-    assert h == w, "non-square images not handled yet"
-    pad = int(round(max_random_shift_ratio * h))
-    x = F.pad(x, tuple([pad] * 4), "replicate")
-    eps = 1.0 / (h + 2 * pad)
-    arange = torch.linspace(
-        -1.0 + eps,
-        1.0 - eps,
-        h + 2 * pad,
-        device=x.device,
-        dtype=torch.float32,
-    )[:h]
-    arange = einops.repeat(arange, "w -> h w 1", h=h)
-    base_grid = torch.cat([arange, arange.transpose(1, 0)], dim=2)
-    base_grid = einops.repeat(base_grid, "h w c -> b h w c", b=b)
-    # A random shift in units of pixels and within the boundaries of the padding.
-    shift = torch.randint(
-        0,
-        2 * pad + 1,
-        size=(b, 1, 1, 2),
-        device=x.device,
-        dtype=torch.float32,
-    )
-    shift *= 2.0 / (h + 2 * pad)
-    grid = base_grid + shift
-    return F.grid_sample(x, grid, padding_mode="zeros", align_corners=False)
-
-
-def update_ema_parameters(ema_net: nn.Module, net: nn.Module, alpha: float):
-    """Update EMA parameters in place with ema_param <- alpha * ema_param + (1 - alpha) * param."""
-    for ema_module, module in zip(ema_net.modules(), net.modules(), strict=True):
-        for (n_p_ema, p_ema), (n_p, p) in zip(
-            ema_module.named_parameters(recurse=False), module.named_parameters(recurse=False), strict=True
-        ):
-            assert n_p_ema == n_p, "Parameter names don't match for EMA model update"
-            if isinstance(p, dict):
-                raise RuntimeError("Dict parameter not supported")
-            if isinstance(module, nn.modules.batchnorm._BatchNorm) or not p.requires_grad:
-                # Copy BatchNorm parameters, and non-trainable parameters directly.
-                p_ema.copy_(p.to(dtype=p_ema.dtype).data)
-            with torch.no_grad():
-                p_ema.mul_(alpha)
-                p_ema.add_(p.to(dtype=p_ema.dtype).data, alpha=1 - alpha)
-
-
-def flatten_forward_unflatten(fn: Callable[[Tensor], Tensor], image_tensor: Tensor) -> Tensor:
-    """Helper to temporarily flatten extra dims at the start of the image tensor.
-
-    Args:
-        fn: Callable that the image tensor will be passed to. It should accept (B, C, H, W) and return
-            (B, *), where * is any number of dimensions.
-        image_tensor: An image tensor of shape (**, C, H, W), where ** is any number of dimensions, generally
-            different from *.
-    Returns:
-        A return value from the callable reshaped to (**, *).
-    """
-    if image_tensor.ndim == 4:
-        return fn(image_tensor)
-    start_dims = image_tensor.shape[:-3]
-    inp = torch.flatten(image_tensor, end_dim=-4)
-    flat_out = fn(inp)
-    return torch.reshape(flat_out, (*start_dims, *flat_out.shape[1:]))
+        feat = torch.stack(feat, dim=0).mean(0)
+        return feat

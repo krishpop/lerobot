@@ -36,15 +36,16 @@ training:
     next.reward: "[i / ${fps} for i in range(${policy.horizon})]"
 
 policy:
-  name: tdmpc
+  name: tdmpc2
 
   pretrained_model_path:
+  multitask: false
+  episode_length: 300
 
   # Input / output structure.
   n_action_repeats: 1
   horizon: 5
   n_action_steps: 5
-  multitask: false
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
@@ -65,11 +66,19 @@ policy:
   # Neural networks.
   image_encoder_hidden_dim: 32
   state_encoder_hidden_dim: 256
-  latent_dim: 50
+  latent_dim: 512
+  task_dim: 96
+  dropout: 0.01
   q_ensemble_size: 5
   mlp_dim: 512
+  simnorm_dim: 8
+  enc_lr_scale: 0.3
+
   # Reinforcement learning.
   discount: 0.9
+  discount_denom: 5
+  discount_min: 0.95
+  discount_max: 0.995
 
   # Inference.
   use_mpc: true
@@ -79,19 +88,27 @@ policy:
   n_gaussian_samples: 512
   n_pi_samples: 51
   uncertainty_regularizer_coeff: 1.0
-  n_elites: 50
+  n_elites: 64
   elite_weighting_temperature: 0.5
   gaussian_mean_momentum: 0.1
+  log_std_min: -10
+  log_std_max: 2
+
+  # critic
+  num_bins: 101
+  vmin: -10
+  vmax: +10
 
   # Training and loss computation.
   max_random_shift_ratio: 0.0476
+
   # Loss coefficients.
   reward_coeff: 0.5
   expectile_weight: 0.9
   value_coeff: 0.1
   consistency_coeff: 20.0
-  advantage_scaling: 3.0
   pi_coeff: 0.5
   temporal_decay_coeff: 0.5
+
   # Target model.
   target_model_momentum: 0.995
