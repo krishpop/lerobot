@@ -50,14 +50,7 @@ training:
     - noise:
         noise_type: gaussian
         mean: 0
-        std: 10
-        apply_to: 
-          - observation.state
-        horizon: ${policy.n_obs_steps}
-    - noise:
-        noise_type: gaussian
-        mean: 0
-        std: 10
+        std: 20
         apply_to: 
          - action
         horizon: ${eval:${policy.n_obs_steps} + ${policy.n_action_pred_token} + ${policy.action_chunk_size} - 2}
