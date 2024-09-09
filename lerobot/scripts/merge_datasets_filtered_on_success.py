@@ -17,8 +17,8 @@ if lerobot_spec is None:
 lerobot_root = Path(lerobot_spec.origin).parent
 config_path = lerobot_root / "configs"
 
-dataset_roots = ["../datasets/pusht/diffusion/step_1225000/2024-08-16_18-22-03", "../datasets/pusht/diffusion/step_1225000/2024-08-16_18-27-05", "../datasets/pusht/diffusion/step_1225000/2024-08-17_09-22-34"]
-dataset_root = "../datasets/pusht/diffusion/step_1225000"
+dataset_roots = ["datasets/pusht/diffusion/step_1225000/2024-08-16_18-22-03", "./datasets/pusht/diffusion/step_1225000/2024-08-16_18-27-05", "./datasets/pusht/diffusion/step_1225000/2024-08-17_09-22-34"]
+dataset_root = "./datasets/pusht/diffusion/step_1225000_successes"
 
 with initialize_config_dir(config_dir=str(config_path)):
     cfg = compose(
@@ -43,13 +43,14 @@ filtered_dataset = offline_dataset.hf_dataset.filter(
 filtered_dataset = reset_episode_index(filtered_dataset)
 filtered_episode_data_index = calculate_episode_data_index(filtered_dataset)
 
-offline_dataset = LeRobotDataset.from_preloaded(
+new_offline_dataset = LeRobotDataset.from_preloaded(
     repo_id="lerobot/pusht",
     hf_dataset=filtered_dataset,
     episode_data_index=filtered_episode_data_index,
     info=offline_dataset.info,
 )
-stats = compute_stats(offline_dataset, 32, 8)
-hf_dataset = hf_dataset.with_format(None)
-hf_dataset.save_to_disk(f"{dataset_root}_successes/lerobot/pusht/train")
-save_meta_data(offline_dataset.info, stats, episode_data_index, Path(f"{dataset_root}_successes/lerobot/pusht/meta_data"))
+new_offline_dataset.features = offline_dataset.features
+stats = compute_stats(new_offline_dataset, 32, 8)
+hf_dataset = new_offline_dataset.hf_dataset.with_format(None)
+hf_dataset.save_to_disk(f"{dataset_root}/lerobot/pusht/train")
+save_meta_data(new_offline_dataset.info, stats, episode_data_index, Path(f"{dataset_root}/lerobot/pusht/meta_data"))
