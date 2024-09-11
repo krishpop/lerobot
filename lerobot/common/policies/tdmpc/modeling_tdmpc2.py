@@ -111,7 +111,7 @@ def two_hot(x, cfg):
 		return x
 	elif cfg.num_bins == 1:
 		return symlog(x)
-	x = torch.clamp(symlog(x), cfg.vmin, cfg.vmax).squeeze(1)
+	x = torch.clamp(symlog(x), cfg.vmin, cfg.vmax)
 	bin_idx = torch.floor((x - cfg.vmin) / cfg.bin_size).long()
 	bin_offset = ((x - cfg.vmin) / cfg.bin_size - bin_idx.float()).unsqueeze(-1)
 	soft_two_hot = torch.zeros(x.size(0), cfg.num_bins, device=x.device)
@@ -421,7 +421,7 @@ class TDMPC2Policy(nn.Module,
         pi = self.model.pi(next_z, task)[1]
         discount = self.discount[task].unsqueeze(-1) if self.config.multitask else self.discount
         qs = self.model.Qs(next_z, pi, task, return_type='min', target=True)
-        return reward + discount * qs
+        return reward + discount * qs.squeeze()
 
     def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
         """Run the batch through the model and compute the loss."""
@@ -503,40 +503,32 @@ class TDMPC2Policy(nn.Module,
         )
         # Compute the reward loss as MSE loss between rewards predicted from the rollout and the dataset
         # rewards.
-        reward_loss = (
-            (
-                temporal_loss_coeffs
-                * soft_ce(reward_preds, reward.unsqueeze(-1), self.config)
-                * ~batch["next.reward_is_pad"]
-                # `reward_preds` depends on the current observation and the actions.
-                * ~batch["observation.state_is_pad"][0]
-                * ~batch["action_is_pad"]
-            )
-            .sum(0)
-            .mean()
-        )
+        reward_loss = 0
+        for t in range(horizon):
+            reward_loss += (
+                soft_ce(reward_preds[t], reward[t], self.config)
+                * ~batch["next.reward_is_pad"][t]
+                * ~batch["observation.state_is_pad"][t]
+                * ~batch["action_is_pad"][t]
+            ).mean() * self.config.temporal_decay_coeff**t
+        
         # Compute state-action value loss (TD loss) for all of the Q functions in the ensemble.
-        q_value_loss = (
-            (
-                temporal_loss_coeffs
-                * soft_ce(q_preds_ensemble, td_targets.unsqueeze(0).unsqueeze(-1), self.config).mean(dim=0)
-                # `q_preds_ensemble` depends on the first observation and the actions.
-                * ~batch["observation.state_is_pad"][0]
-                * ~batch["action_is_pad"]
-                # q_targets depends on the reward and the next observations.
-                * ~batch["next.reward_is_pad"]
-                * ~batch["observation.state_is_pad"][1:]
-            )
-            .sum(0)
-            .mean()
-        )
+        value_loss = 0
+        for q in range(self.config.q_ensemble_size):
+            for t in range(horizon):
+                value_loss += (
+                    soft_ce(q_preds_ensemble[q][t], td_targets[t], self.config)
+                    * ~batch["next.reward_is_pad"][t]
+                    * ~batch["observation.state_is_pad"][t]
+                    * ~batch["action_is_pad"][t]
+                ).mean() * self.config.temporal_decay_coeff**t
 
         # Calculate the advantage weighted regression loss for π as detailed in FOWM 3.1.
         # We won't need these gradients again so detach.
         z_preds = zs.detach()
 
-        action_preds = self.model.pi(z_preds[:-1])  # (t, b, a)
-        q_preds = self.model.Q(z_preds[:-1], action_preds, return_type='avg')
+        action_preds = self.model.pi(z_preds[:-1], task_index)[1]  # (t, b, a)
+        # q_preds = self.model.Qs(z_preds[:-1], action_preds, task_index, return_type='avg').squeeze()  # (t, b)
         # Calculate the MSE between the actions and the action predictions.
         # Note: FOWM's original code calculates the log probability (wrt to a unit standard deviation
         # gaussian) and sums over the action dimension. Computing the log probability amounts to multiplying
@@ -549,23 +541,19 @@ class TDMPC2Policy(nn.Module,
         # TODO(alexander-soare): Take the sum over the temporal dimension and check that training still works
         # as well as expected.
 
-        if self.config.pi_loss == "mse":
-            pi_loss = (
-                mse
-                * temporal_loss_coeffs
-                # `action_preds` depends on the first observation and the actions.
-                * ~batch["observation.state_is_pad"][0]
-                * ~batch["action_is_pad"]
-            ).mean()
-        elif self.config.pi_loss == "soft":
-            pi_loss = (
-
-            )
+        # if self.config.pi_loss == "mse":
+        pi_loss = (
+            mse
+            * temporal_loss_coeffs
+            # `action_preds` depends on the first observation and the actions.
+            * ~batch["observation.state_is_pad"][0]
+            * ~batch["action_is_pad"]
+        ).mean()
 
         loss = (
             self.config.consistency_coeff * consistency_loss
             + self.config.reward_coeff * reward_loss
-            + self.config.value_coeff * q_value_loss
+            + self.config.value_coeff * value_loss
             + self.config.pi_coeff * pi_loss
         )
 
@@ -573,7 +561,7 @@ class TDMPC2Policy(nn.Module,
             {
                 "consistency_loss": consistency_loss.item(),
                 "reward_loss": reward_loss.item(),
-                "Q_value_loss": q_value_loss.item(),
+                "Q_value_loss": value_loss.item(),
                 "pi_loss": pi_loss.item(),
                 "loss": loss,
                 "sum_loss": loss.item() * self.config.horizon,
