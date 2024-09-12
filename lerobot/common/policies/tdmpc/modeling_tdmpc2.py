@@ -255,9 +255,8 @@ class TDMPC2Policy(nn.Module,
         called on `env.reset()`
         """
         self._queues = {
-            "observation.image": deque(maxlen=1),
             "observation.state": deque(maxlen=1),
-            "action": deque(maxlen=self.config.n_action_repeats),
+            "action": deque(maxlen=max(self.config.n_action_repeats, self.config.n_action_steps)),
         }
         if self._use_image:
             self._queues["observation.image"] = deque(maxlen=1)
@@ -268,10 +267,11 @@ class TDMPC2Policy(nn.Module,
         self._prev_mean: torch.Tensor | None = None
 
     @torch.no_grad()
-    def select_action(self, batch: dict[str, Tensor], t0=False, eval_mode=False, task=None) -> Tensor:
+    def select_action(self, batch: dict[str, Tensor]) -> Tensor:
         """Select a single action given environment observations."""
         batch = self.normalize_inputs(batch)
-        batch["observation.image"] = batch[self.input_image_key]
+        if self._use_image:
+            batch["observation.image"] = batch[self.input_image_key]
 
         self._queues = populate_queues(self._queues, batch)
 
@@ -286,13 +286,12 @@ class TDMPC2Policy(nn.Module,
 
             # NOTE: Order of observations matters here. 
             encode_keys = ["observation.image", "observation.state"]
-            task_index = batch.get("task_index", torch.ones(batch["action"].shape[1]))
+            task_index = batch.get("task_index", torch.ones(batch["observation.state"].shape[0]))
             z = self.model.encode({k: batch[k] for k in encode_keys}, task_index)
             if self.config.use_mpc:
-                action = self.plan(z, t0=t0, eval_mode=eval_mode, task=task)
+                action = self.plan(z, task_index)
             else:
-                a_mu, a_samp, _, _ = self.model.pi(z, task)
-                action = a_mu if eval_mode else a_samp
+                action = self.model.pi(z, task_index)[1]
 
             action = self.unnormalize_outputs({"action": action.clamp(-1, 1)})["action"]
 
@@ -306,7 +305,7 @@ class TDMPC2Policy(nn.Module,
         return action
 
     @torch.no_grad()
-    def plan(self, z: Tensor) -> Tensor:
+    def plan(self, z: Tensor, task_index: Tensor) -> Tensor:
         """Plan next action using TD-MPC inference.
 
         Args:
@@ -317,30 +316,34 @@ class TDMPC2Policy(nn.Module,
         TODO(alexander-soare) Extend this to be able to work with batches.
         """
         device = get_device_from_parameters(self)
+        batch_size = z.shape[0]
 
         # Sample Nπ trajectories from the policy.
         pi_actions = torch.empty(
             self.config.horizon,
             self.config.n_pi_samples,
+            batch_size,
             self.config.output_shapes["action"][0],
             device=device,
         )
         if self.config.n_pi_samples > 0:
-            _z = einops.repeat(z, "d -> n d", n=self.config.n_pi_samples)
+            _z = einops.repeat(z, "b d -> n b d", n=self.config.n_pi_samples)
+            _task_index = einops.repeat(task_index, "b -> n b", n=self.config.n_pi_samples)
             for t in range(self.config.horizon):
                 # Note: Adding a small amount of noise here doesn't hurt during inference and may even be
                 # helpful for CEM.
-                pi_actions[t] = self.model.pi(_z, self.config.min_std)
-                _z = self.model.latent_dynamics(_z, pi_actions[t])
+                pi_actions[t] = self.model.pi(_z, _task_index)[1]
+                _z = self.model.latent_dynamics(_z, pi_actions[t], _task_index)
 
         # In the CEM loop we will need this for a call to estimate_value with the gaussian sampled
         # trajectories.
-        z = einops.repeat(z, "d -> n d", n=self.config.n_gaussian_samples + self.config.n_pi_samples)
+        z = einops.repeat(z, "b d -> n b d", n=self.config.n_gaussian_samples + self.config.n_pi_samples)
+        task_index = einops.repeat(task_index, "b -> n b", n=self.config.n_gaussian_samples + self.config.n_pi_samples)
 
         # Model Predictive Path Integral (MPPI) with the cross-entropy method (CEM) as the optimization
         # algorithm.
         # The initial mean and standard deviation for the cross-entropy method (CEM).
-        mean = torch.zeros(self.config.horizon, self.config.output_shapes["action"][0], device=device)
+        mean = torch.zeros(self.config.horizon, batch_size, self.config.output_shapes["action"][0], device=device)
         # Maybe warm start CEM with the mean from the previous step.
         if self._prev_mean is not None:
             mean[:-1] = self._prev_mean[1:]
@@ -351,6 +354,7 @@ class TDMPC2Policy(nn.Module,
             std_normal_noise = torch.randn(
                 self.config.horizon,
                 self.config.n_gaussian_samples,
+                batch_size,
                 self.config.output_shapes["action"][0],
                 device=std.device,
             )
@@ -358,9 +362,9 @@ class TDMPC2Policy(nn.Module,
 
             # Compute elite actions.
             actions = torch.cat([gaussian_actions, pi_actions], dim=1)
-            value = self.estimate_value(z, actions).nan_to_num_(0)
-            elite_idxs = torch.topk(value, self.config.n_elites, dim=0).indices
-            elite_value, elite_actions = value[elite_idxs], actions[:, elite_idxs]
+            value = self.estimate_value(z, actions, task_index).nan_to_num_(0)  # (n_gaussian_samples + n_pi_samples, batch)
+            elite_idxs = torch.topk(value, self.config.n_elites, dim=0).indices  # (n_elites, batch)
+            elite_value, elite_actions = value[elite_idxs].squeeze(-1), actions[:, elite_idxs].squeeze(-2)
 
             # Update guassian PDF parameters to be the (weighted) mean and standard deviation of the elites.
             max_value = elite_value.max(0)[0]
@@ -369,11 +373,11 @@ class TDMPC2Policy(nn.Module,
             # makes the equations: μ = Σ(s⋅Γ), σ = Σ(s⋅(Γ-μ)²).
             score = torch.exp(self.config.elite_weighting_temperature * (elite_value - max_value))
             score /= score.sum()
-            _mean = torch.sum(einops.rearrange(score, "n -> n 1") * elite_actions, dim=1)
+            _mean = torch.sum(einops.rearrange(score, "n b -> n 1 b") * elite_actions, dim=1)
             _std = torch.sqrt(
                 torch.sum(
-                    einops.rearrange(score, "n -> n 1")
-                    * (elite_actions - einops.rearrange(_mean, "h d -> h 1 d")) ** 2,
+                    einops.rearrange(score, "n b -> n 1 b")
+                    * (elite_actions - einops.rearrange(_mean, "h b d -> h 1 b d")) ** 2,
                     dim=1,
                 )
             )
@@ -388,22 +392,21 @@ class TDMPC2Policy(nn.Module,
 
         # Randomly select one of the elite actions from the last iteration of MPPI/CEM using the softmax
         # scores from the last iteration.
-        actions = elite_actions[:, torch.multinomial(score, 1).item()]
+        actions = elite_actions[:, torch.multinomial(score.T, 1).squeeze(), torch.arange(batch_size)]
 
-        # Select only the first action
-        action = actions[0]
-        return action
+        return actions
 
     @torch.no_grad()
-    def estimate_value(self, z: Tensor, actions: Tensor):
+    def estimate_value(self, z: Tensor, actions: Tensor, task_index: Tensor):
         """Estimate value of a trajectory starting at latent state z and executing given actions."""
         G, discount = 0, 1
         for t in range(self.config.horizon):
-            reward = two_hot_inv(self.model.reward(z, actions[t]), self.config)
-            z = self.model.next(z, actions[t])
+            reward = two_hot_inv(self.model.reward(z, actions[t], task_index), self.config).squeeze(-1)
+            z = self.model.latent_dynamics(z, actions[t], task_index)
             G += discount * reward
             discount *= self.config.discount
-        return G + discount * self.model.Q(z, self.model.pi(z)[1], return_type='avg')
+        G = G + discount * two_hot_inv(self.model.Qs(z, self.model.pi(z, task_index)[1], task_index, return_type='avg'), self.config).squeeze(-1)
+        return G
 
     @torch.no_grad()
     def _td_target(self, next_z, reward, task):
@@ -440,7 +443,7 @@ class TDMPC2Policy(nn.Module,
 
         action = batch["action"]  # (t, b)
         reward = batch["next.reward"]  # (t,)
-        task_index = batch.get("task_index", torch.ones(batch["action"].shape[1], device=device))
+        task_index = batch.get("task_index", torch.ones(batch["action"].shape[1], device=device, dtype=torch.long))
         observations = {k: v for k, v in batch.items() if k.startswith("observation.")}
 
         # Apply random image augmentationse
