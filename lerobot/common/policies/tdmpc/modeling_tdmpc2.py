@@ -226,6 +226,8 @@ class TDMPC2Policy(nn.Module,
             self.input_image_key = image_keys[0]
         if "observation.environment_state" in config.input_shapes:
             self._use_env_state = True
+        if "observation.state" in config.input_shapes:
+            self._use_agent_pos = True
 
         self.discount = torch.tensor(
 			[self._get_discount(ep_len) for ep_len in config.episode_lengths], device='cuda'
@@ -255,9 +257,10 @@ class TDMPC2Policy(nn.Module,
         called on `env.reset()`
         """
         self._queues = {
-            "observation.state": deque(maxlen=1),
             "action": deque(maxlen=max(self.config.n_action_repeats, self.config.n_action_steps)),
         }
+        if self._use_agent_pos:
+            self._queues["observation.state"] = deque(maxlen=1)
         if self._use_image:
             self._queues["observation.image"] = deque(maxlen=1)
         if self._use_env_state:
@@ -285,10 +288,14 @@ class TDMPC2Policy(nn.Module,
                 batch[key] = batch[key][:, 0]
 
             # NOTE: Order of observations matters here. 
-            encode_keys = ["observation.image", "observation.state"]
+            encode_keys = []
+            if self._use_agent_pos:
+                encode_keys.append("observation.state")
+            if self._use_image:
+                encode_keys.append("observation.image")
             if self._use_env_state:
                 encode_keys.append("observation.environment_state")
-            task_index = batch.get("task_index", torch.ones(batch["observation.state"].shape[0]))
+            task_index = batch.get("task_index", torch.ones(batch[encode_keys[0]].shape[0]))
             z = self.model.encode({k: batch[k] for k in encode_keys}, task_index)
             if self.config.use_mpc:
                 action = self.plan(z, task_index)
@@ -433,7 +440,8 @@ class TDMPC2Policy(nn.Module,
         device = get_device_from_parameters(self)
 
         batch = self.normalize_inputs(batch)
-        batch["observation.image"] = batch[self.input_image_key]
+        if self._use_image:
+            batch["observation.image"] = batch[self.input_image_key]
         batch = self.normalize_targets(batch)
 
         info = {}
@@ -461,7 +469,8 @@ class TDMPC2Policy(nn.Module,
         for k in observations:
             current_observation[k] = observations[k][0]
             next_observations[k] = observations[k][1:]
-        horizon = next_observations["observation.image"].shape[0]
+        horizon = self.config.horizon
+
 
         # Run latent rollout using the latent dynamics model and policy model.
         # Note this has shape `horizon+1` because there are `horizon` actions and a current `z`. Each action
@@ -834,14 +843,20 @@ class TDMPCObservationEncoder(nn.Module):
                     nn.Sigmoid(),
                 )
             )
-        if "observation.state" in config.input_shapes:
-            self.state_enc_layers = nn.Sequential(
-                nn.Linear(config.input_shapes["observation.state"][0] + config.task_dim, config.state_encoder_hidden_dim),
-                nn.ELU(),
-                nn.Linear(config.state_encoder_hidden_dim, config.latent_dim),
-                nn.LayerNorm(config.latent_dim),
-                nn.Sigmoid(),
-            )
+        self.state_encoder_inputs = [ ]
+        self.state_encoders = nn.ModuleList()
+        for input_shape_key in config.input_shapes:
+            input_shape = config.input_shapes[input_shape_key]
+            if len(input_shape) == 1:
+                state_enc_layers = nn.Sequential(
+                     nn.Linear(input_shape[0] + config.task_dim, config.state_encoder_hidden_dim),
+                     nn.ELU(),
+                     nn.Linear(config.state_encoder_hidden_dim, config.latent_dim),
+                     nn.LayerNorm(config.latent_dim),
+                     nn.Sigmoid(),
+                )
+                self.state_encoder_inputs.append(input_shape_key)
+                self.state_encoders.append(state_enc_layers)
 
     def forward(self, obs_dict: dict[str, Tensor]) -> Tensor:
         """Encode the image and/or state vector.
@@ -852,7 +867,7 @@ class TDMPCObservationEncoder(nn.Module):
         feat = []
         if "observation.image" in self.config.input_shapes:
             feat.append(flatten_forward_unflatten(self.image_enc_layers, obs_dict["observation.image"]))
-        if "observation.state" in self.config.input_shapes:
-            feat.append(self.state_enc_layers(obs_dict["observation.state"]))
+        for k, enc in zip(self.state_encoder_inputs, self.state_encoders):
+            feat.append(enc(obs_dict[k]))
         feat = torch.stack(feat, dim=0).mean(0)
         return feat
