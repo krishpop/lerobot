@@ -47,20 +47,13 @@ training:
     enable: true
 
   custom_transforms:
-    - noise:
-        noise_type: gaussian
-        mean: 0
-        std: 10
-        apply_to: 
-          - observation.state
-        horizon: ${policy.n_obs_steps}
-    - noise:
-        noise_type: gaussian
-        mean: 0
-        std: 10
-        apply_to: 
-         - action
-        horizon: ${eval:${policy.n_obs_steps} + ${policy.n_action_pred_token} + ${policy.action_chunk_size} - 2}
+    action_noise:
+      noise_type: gaussian
+      mean: 0
+      std: 20
+      apply_to: 
+        - action
+      horizon: ${eval:${policy.n_obs_steps} + ${policy.n_action_pred_token} + ${policy.action_chunk_size} - 2}
   delta_timestamps:
     observation.image: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
     observation.state: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"

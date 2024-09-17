@@ -235,6 +235,7 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
         root: Path | None = DATA_DIR,
         split: str = "train",
         image_transforms: Callable | None = None,
+        custom_transforms: Callable | None = None,
         delta_timestamps: dict[list[float]] | None = None,
         video_backend: str | None = None,
     ):
@@ -252,6 +253,7 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
                         split=split,
                         delta_timestamps=delta_timestamps,
                         image_transforms=image_transforms,
+                        custom_transforms=custom_transforms,
                         video_backend=video_backend,
                     )
                 )
@@ -263,6 +265,7 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
                     split=split,
                     delta_timestamps=delta_timestamps,
                     image_transforms=image_transforms,
+                    custom_transforms=custom_transforms,
                     video_backend=video_backend,
                 )
                 for repo_id in repo_ids
