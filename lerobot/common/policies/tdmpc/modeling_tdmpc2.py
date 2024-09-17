@@ -289,7 +289,6 @@ class TDMPC2Policy(nn.Module,
             if self._use_env_state:
                 encode_keys.append("observation.environment_state")
             task_index = batch.get("task_index", torch.ones(batch["observation.state"].shape[0]))
-            breakpoint()
             z = self.model.encode({k: batch[k] for k in encode_keys}, task_index)
             if self.config.use_mpc:
                 action = self.plan(z, task_index)
