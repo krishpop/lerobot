@@ -96,6 +96,7 @@ training:
   critic_distillation: false
 
   custom_transforms: {}
+  custom_transforms_path: null
   image_transforms:
   # These transforms are all using standard torchvision.transforms.v2
   # You can find out how these transformations affect images here:
