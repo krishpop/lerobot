@@ -124,7 +124,7 @@ class VQBeTPolicy(
         action = self._queues["action"].popleft()
         return action
 
-    def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
+    def forward(self, batch: dict[str, Tensor], return_predicted_action: bool = False) -> dict[str, Tensor]:
         """Run the batch through the model and compute the loss for training or validation."""
         batch = self.normalize_inputs(batch)
         batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
@@ -145,7 +145,7 @@ class VQBeTPolicy(
                 "recon_l1_error": recon_l1_error,
             }
         # if Residual VQ is already trained, VQ-BeT trains its GPT and bin prediction head / offset prediction head parts.
-        _, loss_dict = self.vqbet(batch, rollout=False)
+        _, loss_dict = self.vqbet(batch, rollout=False, return_predicted_action=return_predicted_action)
 
         return loss_dict
 
@@ -309,7 +309,7 @@ class VQBeTModel(nn.Module):
         )
         self._task_emb = nn.Embedding(3, 512, max_norm=1)  # TODO@bsud: remove hardcoded 3
 
-    def forward(self, batch: dict[str, Tensor], rollout: bool) -> Tensor:
+    def forward(self, batch: dict[str, Tensor], rollout: bool, return_predicted_action: bool = False) -> Tensor:
         # Input validation.
         assert set(batch).issuperset({"observation.state", "observation.images"})
         batch_size, n_obs_steps = batch["observation.state"].shape[:2]
@@ -369,10 +369,11 @@ class VQBeTModel(nn.Module):
         else:
             output = batch["action"][:, self.select_target_actions_indices]
             loss = self.action_head.loss_fn(action_head_output, output, reduction="mean")
-            loss["action_head_output"] = action_head_output
-            loss["action_head_output"]["predicted_action_chunk"] = action_head_output["predicted_action"][
-                :, n_obs_steps - 1, :
-            ].reshape(batch_size, self.config.action_chunk_size, -1)
+            if return_predicted_action:
+                loss["action_head_output"] = action_head_output
+                loss["action_head_output"]["predicted_action_chunk"] = action_head_output["predicted_action"][
+                    :, n_obs_steps - 1, :
+                ].reshape(batch_size, self.config.action_chunk_size, -1)
             return action_head_output, loss
 
 

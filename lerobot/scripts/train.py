@@ -185,7 +185,7 @@ def update_policy_with_critic(
     device = get_device_from_parameters(policy)
     policy.train()
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
-        output_dict = policy.forward(batch)
+        output_dict = policy.forward(batch, return_predicted_action=True)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
         policy_loss = output_dict["loss"]
         
@@ -543,7 +543,8 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
 
         # Note: evaluate_and_checkpoint_if_needed happens **after** the `step`th training update has completed,
         # so we pass in step + 1.
-        evaluate_and_checkpoint_if_needed(step + 1, is_online=False)
+        evaluate_and_checkpoint_if_needed(step, is_online=False)
+        evaluate_and_checkpoint_if_needed(step, is_online=False)
 
         step += 1
         offline_step += 1  # noqa: SIM113
