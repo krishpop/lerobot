@@ -402,7 +402,7 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
             raise AssertionError("We expect the loop to break out as long as the index is within bounds.")
         item = self._datasets[dataset_idx][idx - start_idx]
         item["dataset_index"] = torch.tensor(dataset_idx)
-        item["task_index"] = torch.tensor(dataset_idx)
+        #item["task_index"] = torch.tensor(dataset_idx)
         for data_key in self.disabled_data_keys:
             if data_key in item:
                 del item[data_key]
