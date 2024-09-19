@@ -543,8 +543,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
 
         # Note: evaluate_and_checkpoint_if_needed happens **after** the `step`th training update has completed,
         # so we pass in step + 1.
-        evaluate_and_checkpoint_if_needed(step, is_online=False)
-        evaluate_and_checkpoint_if_needed(step, is_online=False)
+        evaluate_and_checkpoint_if_needed(step + 1, is_online=False)
 
         step += 1
         offline_step += 1  # noqa: SIM113
