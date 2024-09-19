@@ -1,0 +1,126 @@
+# @package _global_
+
+seed: 1
+dataset_repo_id: bhavnasud/pusht_keypoints_images
+
+override_dataset_stats:
+  observation.image:
+    # stats from imagenet, since we use a pretrained vision model
+    mean: [[[0.485]], [[0.456]], [[0.406]]]  # (c,1,1)
+    std: [[[0.229]], [[0.224]], [[0.225]]]  # (c,1,1)
+
+training:
+  offline_steps: 2000000
+  save_freq: 10000
+  # TODO(alexander-soare): uncomment when online training gets reinstated
+  online_steps: 0
+  eval_freq: 10000
+  online_steps_between_rollouts: 1000
+  online_sampling_ratio: 0.5
+  online_rollout_n_episodes: 10
+  online_rollout_batch_size: 10
+  online_buffer_capacity: 10000
+  online_buffer_seed_size: 0
+  online_env_seed: 10000
+  do_online_rollout_async: false
+  log_freq: 100
+
+  batch_size: 256
+  grad_clip_norm: 10.0
+  lr: 3e-4 
+  custom_transforms:
+    action_noise:
+      noise_type: gaussian
+      noise_granularity: episode
+      apply_to:
+        - action
+      std: 5
+      mean: 0
+      noise_levels: 4
+      input_shape: ${eval:"[${env.action_dim}]"}  # add chunk_size if using item granularity 
+  delta_timestamps:
+    observation.environment_state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
+    observation.image: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
+    observation.state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
+    action: "[i / ${fps} for i in range(${policy.horizon})]"
+    next.reward: "[i / ${fps} for i in range(${policy.horizon})]"
+
+policy:
+  name: tdmpc2
+
+  pretrained_model_path:
+  multitask: false
+  episode_length: 300
+
+  # Input / output structure.
+  n_action_repeats: 1
+  horizon: 5
+  n_action_steps: 5
+
+  input_shapes:
+    # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
+    observation.image: [3, 96, 96]
+    observation.state: ["${env.state_dim}"]
+    observation.environment_state: [16]
+  output_shapes:
+    action: ["${env.action_dim}"]
+
+  # Normalization / Unnormalization
+  input_normalization_modes:
+    observation.image: mean_std
+    # Use min_max normalization just because it's more standard.
+    observation.state: min_max
+    observation.environment_state: min_max
+  output_normalization_modes:
+    action: min_max
+
+  # Architecture / modeling.
+  # Neural networks.
+  image_encoder_hidden_dim: 32
+  state_encoder_hidden_dim: 256
+  latent_dim: 512
+  task_dim: 96
+  dropout: 0.01
+  q_ensemble_size: 5
+  mlp_dim: 512
+  simnorm_dim: 8
+  enc_lr_scale: 0.3
+
+  # Reinforcement learning.
+  discount: 0.9
+  discount_denom: 5
+  discount_min: 0.95
+  discount_max: 0.995
+
+  # Inference.
+  use_mpc: true
+  cem_iterations: 6
+  max_std: 2.0
+  min_std: 0.05
+  n_gaussian_samples: 512
+  n_pi_samples: 51
+  uncertainty_regularizer_coeff: 1.0
+  n_elites: 64
+  elite_weighting_temperature: 0.5
+  gaussian_mean_momentum: 0.1
+  log_std_min: -10
+  log_std_max: 2
+
+  # critic
+  num_bins: 101
+  vmin: -10
+  vmax: +10
+
+  # Training and loss computation.
+  max_random_shift_ratio: 0.0476
+
+  # Loss coefficients.
+  reward_coeff: 0.5
+  expectile_weight: 0.9
+  value_coeff: 0.1
+  consistency_coeff: 20.0
+  pi_coeff: 0.5
+  temporal_decay_coeff: 0.5
+
+  # Target model.
+  target_model_momentum: 0.995
