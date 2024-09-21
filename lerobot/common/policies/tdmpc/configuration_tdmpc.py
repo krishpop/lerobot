@@ -217,6 +217,7 @@ class TDMPC2Config(TDMPCConfig):
     discount_min: float = 0.95
     discount_max: float = 0.995
     episode_length: int = 300
+    entropy_coef: float = 1e-4
 
     def __post_init__(self):
         super().__post_init__()

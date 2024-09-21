@@ -373,22 +373,21 @@ class TDMPC2Policy(nn.Module,
             actions = torch.cat([gaussian_actions, pi_actions], dim=1)
             value = self.estimate_value(z, actions, task_index).nan_to_num_(0)  # (n_gaussian_samples + n_pi_samples, batch)
             elite_idxs = torch.topk(value, self.config.n_elites, dim=0).indices  # (n_elites, batch)
-            elite_value, elite_actions = value[elite_idxs].squeeze(-1), actions[:, elite_idxs].squeeze(-2)
+            expanded_elite_idxs = elite_idxs.unsqueeze(0).unsqueeze(-1).expand(self.config.horizon, -1, -1, actions.shape[-1])
+
+            elite_value, elite_actions = torch.gather(value, 0, elite_idxs), torch.gather(actions, 1, expanded_elite_idxs)
 
             # Update guassian PDF parameters to be the (weighted) mean and standard deviation of the elites.
-            max_value = elite_value.max(0)[0]
+            max_value = elite_value.max(dim=0, keepdim=True)[0]
             # The weighting is a softmax over trajectory values. Note that this is not the same as the usage
             # of Ω in eqn 4 of the TD-MPC paper. Instead it is the normalized version of it: s = Ω/ΣΩ. This
             # makes the equations: μ = Σ(s⋅Γ), σ = Σ(s⋅(Γ-μ)²).
             score = torch.exp(self.config.elite_weighting_temperature * (elite_value - max_value))
-            score /= score.sum()
-            _mean = torch.sum(einops.rearrange(score, "n b -> n 1 b") * elite_actions, dim=1)
+            score /= score.sum(dim=0, keepdim=True)
+            score = score.unsqueeze(0).unsqueeze(-1)
+            _mean = torch.sum(score * elite_actions, dim=1)
             _std = torch.sqrt(
-                torch.sum(
-                    einops.rearrange(score, "n b -> n 1 b")
-                    * (elite_actions - einops.rearrange(_mean, "h b d -> h 1 b d")) ** 2,
-                    dim=1,
-                )
+                torch.sum(score * (elite_actions - _mean.unsqueeze(1)) ** 2, dim=1)
             )
             # Update mean with an exponential moving average, and std with a direct replacement.
             mean = (
@@ -400,8 +399,9 @@ class TDMPC2Policy(nn.Module,
         self._prev_mean = mean
 
         # Randomly select one of the elite actions from the last iteration of MPPI/CEM using the softmax
-        # scores from the last iteration.
-        actions = elite_actions[:, torch.multinomial(score.T, 1).squeeze(), torch.arange(batch_size)]
+        # scores from the last iteration. 
+        sampled_action_indices = torch.multinomial(score.squeeze().T, 1).T.unsqueeze(0).unsqueeze(-1).expand(self.config.horizon, -1, -1, self.config.output_shapes['action'][0])
+        actions = elite_actions.gather(1, sampled_action_indices).squeeze(1)
 
         return actions
 
@@ -541,7 +541,9 @@ class TDMPC2Policy(nn.Module,
         # We won't need these gradients again so detach.
         z_preds = zs.detach()
 
-        action_preds = self.model.pi(z_preds[:-1], task_index)[1]  # (t, b, a)
+        _, action_preds, log_pis, _ = self.model.pi(z_preds[:-1], task_index)  # (t, b, a)
+        qs = self.model.Qs(z_preds[:-1], action_preds, task_index, return_type='avg').squeeze()  # (t, b)
+        qs = two_hot_inv(qs, self.config)
         # q_preds = self.model.Qs(z_preds[:-1], action_preds, task_index, return_type='avg').squeeze()  # (t, b)
         # Calculate the MSE between the actions and the action predictions.
         # Note: FOWM's original code calculates the log probability (wrt to a unit standard deviation
@@ -549,7 +551,9 @@ class TDMPC2Policy(nn.Module,
         # the MSE by 0.5 and adding a constant offset (the log(2*pi) term) . Here we drop the constant offset
         # as it doesn't change the optimization step, and we drop the 0.5 as we instead make a configuration
         # parameter for it (see below where we compute the total loss).
-        mse = F.mse_loss(action_preds, action, reduction="none").sum(-1)  # (t, b)
+
+        # mse = F.mse_loss(action_preds, action, reduction="none").sum(-1)  # (t, b)
+
         # NOTE: The original implementation does not take the sum over the temporal dimension like with the
         # other losses.
         # TODO(alexander-soare): Take the sum over the temporal dimension and check that training still works
@@ -557,7 +561,7 @@ class TDMPC2Policy(nn.Module,
 
         # if self.config.pi_loss == "mse":
         pi_loss = (
-            mse
+            (self.config.entropy_coef * log_pis - qs).mean(2)
             * temporal_loss_coeffs
             # `action_preds` depends on the first observation and the actions.
             * ~batch["observation.state_is_pad"][0]
