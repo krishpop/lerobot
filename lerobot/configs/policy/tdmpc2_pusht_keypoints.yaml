@@ -32,7 +32,6 @@ training:
 
   delta_timestamps:
     observation.environment_state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
-    observation.image: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
     observation.state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
     action: "[i / ${fps} for i in range(${policy.horizon})]"
     next.reward: "[i / ${fps} for i in range(${policy.horizon})]"
@@ -51,7 +50,6 @@ policy:
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
-    observation.image: [3, 96, 96]
     observation.state: ["${env.state_dim}"]
     observation.environment_state: [16]
   output_shapes:
