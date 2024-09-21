@@ -552,7 +552,7 @@ class TDMPC2Policy(nn.Module,
         # as it doesn't change the optimization step, and we drop the 0.5 as we instead make a configuration
         # parameter for it (see below where we compute the total loss).
 
-        # mse = F.mse_loss(action_preds, action, reduction="none").sum(-1)  # (t, b)
+        pi_loss = (self.config.entropy_coef * log_pis - qs).mean(2) if self.config.pi_loss == "entropy" else F.mse_loss(action_preds, action, reduction="none").sum(-1)
 
         # NOTE: The original implementation does not take the sum over the temporal dimension like with the
         # other losses.
@@ -561,7 +561,7 @@ class TDMPC2Policy(nn.Module,
 
         # if self.config.pi_loss == "mse":
         pi_loss = (
-            (self.config.entropy_coef * log_pis - qs).mean(2)
+            pi_loss
             * temporal_loss_coeffs
             # `action_preds` depends on the first observation and the actions.
             * ~batch["observation.state_is_pad"][0]
