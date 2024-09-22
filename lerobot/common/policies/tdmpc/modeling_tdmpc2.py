@@ -216,14 +216,13 @@ class TDMPC2Policy(nn.Module,
 
         image_keys = [k for k in config.input_shapes if k.startswith("observation.image")]
         # Note: This check is covered in the post-init of the config but have a sanity check just in case.
-        assert len(image_keys) == 1
-        self.input_image_key = image_keys[0]
-        self._use_image = False
-        self._use_env_state = False
+        # assert len(image_keys) == 1
         if len(image_keys) > 0:
             assert len(image_keys) == 1
-            self._use_image = True
             self.input_image_key = image_keys[0]
+            self._use_image = True
+        else:
+            self._use_image = False
         if "observation.environment_state" in config.input_shapes:
             self._use_env_state = True
         if "observation.state" in config.input_shapes:
