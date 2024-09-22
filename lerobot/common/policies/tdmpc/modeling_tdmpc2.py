@@ -541,7 +541,7 @@ class TDMPC2Policy(nn.Module,
         z_preds = zs.detach()
 
         _, action_preds, log_pis, _ = self.model.pi(z_preds, task_index)  # (t, b, a)
-        qs = self.model.Qs(z_preds[:-1], action_preds, task_index, return_type='avg').squeeze()  # (t, b)
+        qs = self.model.Qs(z_preds, action_preds, task_index, return_type='avg').squeeze()  # (t, b)
         # q_preds = self.model.Qs(z_preds[:-1], action_preds, task_index, return_type='avg').squeeze()  # (t, b)
         # Calculate the MSE between the actions and the action predictions.
         # Note: FOWM's original code calculates the log probability (wrt to a unit standard deviation
