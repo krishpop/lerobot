@@ -413,7 +413,7 @@ class TDMPC2Policy(nn.Module,
             z = self.model.latent_dynamics(z, actions[t], task_index)
             G += discount * reward
             discount *= self.config.discount
-        G = G + discount * two_hot_inv(self.model.Qs(z, self.model.pi(z, task_index)[1], task_index, return_type='avg'), self.config).squeeze(-1)
+        G = G + discount * self.model.Qs(z, self.model.pi(z, task_index)[1], task_index, return_type='avg')
         return G
 
     @torch.no_grad()
@@ -541,30 +541,31 @@ class TDMPC2Policy(nn.Module,
         z_preds = zs.detach()
 
         _, action_preds, log_pis, _ = self.model.pi(z_preds, task_index)  # (t, b, a)
+        log_pis = log_pis.squeeze()
         qs = self.model.Qs(z_preds, action_preds, task_index, return_type='avg').squeeze()  # (t, b)
         # q_preds = self.model.Qs(z_preds[:-1], action_preds, task_index, return_type='avg').squeeze()  # (t, b)
-        # Calculate the MSE between the actions and the action predictions.
+        # Calculate the MSE between the /lossactions and the action predictions.
         # Note: FOWM's original code calculates the log probability (wrt to a unit standard deviation
         # gaussian) and sums over the action dimension. Computing the log probability amounts to multiplying
         # the MSE by 0.5 and adding a constant offset (the log(2*pi) term) . Here we drop the constant offset
         # as it doesn't change the optimization step, and we drop the 0.5 as we instead make a configuration
         # parameter for it (see below where we compute the total loss).
 
-        pi_loss = (self.config.entropy_coef * log_pis - qs).mean(2) if self.config.pi_loss == "entropy" else F.mse_loss(action_preds, action, reduction="none").sum(-1)
+        if self.config.pi_loss == "entropy":
+            pi_loss = (self.config.entropy_coef * log_pis - qs)
+            mask = ~batch["observation.state_is_pad"]
+        else:
+            pi_loss = F.mse_loss(action_preds, action, reduction="none").sum(-1)
+            mask = ~batch["action_is_pad"] * ~batch["observation.state_is_pad"][0]
+
+        rho = torch.pow(self.config.temporal_decay_coeff, torch.arange(len(pi_loss), device=device)).unsqueeze(-1)
 
         # NOTE: The original implementation does not take the sum over the temporal dimension like with the
         # other losses.
         # TODO(alexander-soare): Take the sum over the temporal dimension and check that training still works
         # as well as expected.
 
-        # if self.config.pi_loss == "mse":
-        pi_loss = (
-            pi_loss
-            * temporal_loss_coeffs
-            # `action_preds` depends on the first observation and the actions.
-            * ~batch["observation.state_is_pad"][0]
-            * ~batch["action_is_pad"]
-        ).mean()
+        pi_loss = (pi_loss * rho * mask).mean()
 
         loss = (
             self.config.consistency_coeff * consistency_loss
@@ -777,15 +778,17 @@ class TDMPC2WorldModel(nn.Module):
         qs = self._Qs if not target else self._target_Qs
         out = torch.stack([q(x).squeeze(-1) for q in qs], dim=0)
         if return_type == 'all':
-            return out
+            return torch.stack([two_hot_inv(q(x).squeeze(-1), self.config) for q in qs], dim=0).mean(dim=0)
         else:
             if self.config.q_ensemble_size > 2:  # noqa: SIM108
                 out = [out[i] for i in np.random.choice(len(self._Qs), size=2)]
             q1, q2 = two_hot_inv(out[0], self.config), two_hot_inv(out[1], self.config)
             if return_type == 'min':
                 return torch.min(q1, q2)
-            else:
-                return torch.stack([q(x).squeeze(-1) for q in qs], dim=0).mean(dim=0)
+            elif return_type == 'avg':
+                return (q1 + q2) / 2
+            # else:
+            #     return torch.stack([two_hot_inv(q(x).squeeze(-1), self.config) for q in qs], dim=0).mean(dim=0)
 
     def task_emb(self, z: Tensor | dict[str, Tensor], task_index: Tensor) -> Tensor:
         if isinstance(task_index, int):

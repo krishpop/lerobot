@@ -1,5 +1,17 @@
 # @package _global_
 
+# Train with:
+#
+# python lerobot/scripts/train.py \
+#   env=pusht \
+#   env.gym.obs_type=pixels_environment_state_agent_pos \
+#   policy=tdmpc_pusht_keypoints \
+#   eval.batch_size=50 \
+#   eval.n_episodes=50 \
+#   eval.use_async_envs=true \
+#   device=cuda \
+#   use_amp=true
+
 seed: 1
 dataset_repo_id: bhavnasud/pusht_keypoints_images
 
@@ -89,7 +101,7 @@ policy:
   max_std: 2.0
   min_std: 0.05
   n_gaussian_samples: 512
-  n_pi_samples: 51
+  n_pi_samples: 24
   uncertainty_regularizer_coeff: 1.0
   n_elites: 64
   elite_weighting_temperature: 0.5
