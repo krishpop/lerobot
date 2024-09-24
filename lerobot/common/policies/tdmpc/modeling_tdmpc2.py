@@ -847,7 +847,8 @@ class TDMPCObservationEncoder(nn.Module):
             )
         self.state_encoder_inputs = [ ]
         self.state_encoders = nn.ModuleList()
-        for input_shape_key in config.input_shapes:
+        #for input_shape_key in config.input_shapes:
+        for input_shape_key in ["observation.state", "observation.environment_state"]:
             input_shape = config.input_shapes[input_shape_key]
             if len(input_shape) == 1:
                 state_enc_layers = nn.Sequential(
