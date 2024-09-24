@@ -179,22 +179,6 @@ class TDMPC2Policy(nn.Module,
                 that they will be passed with a call to `load_state_dict` before the policy is used.
         """
         super().__init__()
-        logging.warning(
-            """
-            Please note several warnings for this policy.
-
-            - Evaluation of pretrained weights created with the original FOWM code
-              (https://github.com/fyhMer/fowm) works as expected. To be precise: we trained and evaluated a
-              model with the FOWM code for the xarm_lift_medium_replay dataset. We ported the weights across
-             to LeRobot, and were able to evaluate with the same success metric. BUT, we had to use inter-
-             process communication to use the xarm environment from FOWM. This is because our xarm
-              environment uses newer dependencies and does not match the environment in FOWM. See
-              https://github.com/huggingface/lerobot/pull/103 for implementation details.
-            - We have NOT checked that training on LeRobot reproduces SOTA results. This is a TODO.
-            - Our current xarm datasets were generated using the environment from FOWM. Therefore they do not
-              match our xarm environment.
-            """
-        )
 
         if config is None:
             config = TDMPC2Config()
@@ -486,7 +470,7 @@ class TDMPC2Policy(nn.Module,
 
         # Compute Q and V value predictions based on the latent rollout.
         q_preds_ensemble = self.model.Qs(_zs, action, task_index, return_type="all")  # (ensemble, horizon, batch)
-        info.update({"Q": q_preds_ensemble.mean().item()})
+        info.update({"Q": torch.cat([two_hot_inv(q, self.config) for q in q_preds_ensemble], dim=0).mean(dim=0).mean().item()})
 
         # Compute various targets with stopgrad.
         with torch.no_grad():
@@ -772,7 +756,7 @@ class TDMPC2WorldModel(nn.Module):
         qs = self._Qs if not target else self._target_Qs
         out = torch.stack([q(x).squeeze(-1) for q in qs], dim=0)
         if return_type == 'all':
-            return torch.stack([two_hot_inv(q(x).squeeze(-1), self.config) for q in qs], dim=0).mean(dim=0)
+            return out
         else:
             if self.config.q_ensemble_size > 2:  # noqa: SIM108
                 out = [out[i] for i in np.random.choice(len(self._Qs), size=2)]
