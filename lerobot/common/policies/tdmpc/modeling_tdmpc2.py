@@ -209,7 +209,7 @@ class TDMPC2Policy(nn.Module,
             self.normalize_inputs = nn.Identity()
         self.normalize_targets = Normalize(
             config.output_shapes, config.output_normalization_modes, dataset_stats
-        )
+    )
         self.unnormalize_outputs = Unnormalize(
             config.output_shapes, config.output_normalization_modes, dataset_stats
         )
@@ -565,13 +565,13 @@ class TDMPC2Policy(nn.Module,
         # TODO(alexander-soare): Take the sum over the temporal dimension and check that training still works
         # as well as expected.
 
-        pi_loss = (pi_loss * rho * mask).mean()
+        pi_loss = self.config.pi_coeff * (pi_loss * rho * mask).mean()
 
         loss = (
             self.config.consistency_coeff * consistency_loss
             + self.config.reward_coeff * reward_loss
             + self.config.value_coeff * value_loss
-            + self.config.pi_coeff * pi_loss
+            # + self.config.pi_coeff * pi_loss
         )
 
         info.update(
@@ -579,7 +579,8 @@ class TDMPC2Policy(nn.Module,
                 "consistency_loss": consistency_loss.item(),
                 "reward_loss": reward_loss.item(),
                 "Q_value_loss": value_loss.item(),
-                "pi_loss": pi_loss.item(),
+                "pi_loss": pi_loss,
+                # "pi_loss": pi_loss.item(),
                 "loss": loss,
                 "sum_loss": loss.item() * self.config.horizon,
             }
@@ -591,13 +592,6 @@ class TDMPC2Policy(nn.Module,
                 batch[key] = batch[key].transpose(1, 0)
 
         return info
-
-    def update(self):
-        """Update the target model's parameters with an EMA step."""
-        # Note a minor variation with respect to the original FOWM code. Here they do this based on an EMA
-        # update frequency parameter which is set to 2 (every 2 steps an update is done). To simplify the code
-        # we update every step and adjust the decay parameter `alpha` accordingly (0.99 -> 0.995)
-
 
 class TDMPC2WorldModel(nn.Module):
     """Task-Oriented Latent Dynamics (TOLD) model used in TD-MPC2."""
@@ -809,7 +803,19 @@ class TDMPC2WorldModel(nn.Module):
                 emb = emb.unsqueeze(0).repeat(z.shape[0], 1, 1)
             elif emb.shape[0] == 1:
                 emb = emb.repeat(z.shape[0], 1)
-            return torch.cat([z, emb], dim=-1)
+            return torch.cat([z, emb], dim=-1) 
+        
+    def track_q_grad(self, mode=True):
+        """
+        Enables/disables gradient tracking of Q-networks.
+        Avoids unnecessary computation during policy optimization.
+        This method also enables/disables gradients for task embeddings.
+        """
+        for p in self._Qs.parameters():
+            p.requires_grad_(mode)
+        if self.config.multitask:
+            for p in self._task_emb.parameters(): 
+                p.requires_grad_(mode)
 
 
 class TDMPCObservationEncoder(nn.Module):
@@ -850,8 +856,7 @@ class TDMPCObservationEncoder(nn.Module):
             )
         self.state_encoder_inputs = [ ]
         self.state_encoders = nn.ModuleList()
-        #for input_shape_key in config.input_shapes:
-        for input_shape_key in ["observation.state", "observation.environment_state"]:
+        for input_shape_key in config.input_shapes:
             input_shape = config.input_shapes[input_shape_key]
             if len(input_shape) == 1:
                 state_enc_layers = nn.Sequential(
@@ -877,3 +882,19 @@ class TDMPCObservationEncoder(nn.Module):
             feat.append(enc(obs_dict[k]))
         feat = torch.stack(feat, dim=0).mean(0)
         return feat
+
+
+class TDMPC2Optimizer(torch.optim.Adam):
+    def __init__(self, policy, cfg):
+        self.model_params = [
+            {'params': policy.model._encoder.parameters(), 'lr': cfg.training.lr * cfg.policy.enc_lr_scale},
+            {'params': policy.model._dynamics.parameters()},
+            {'params': policy.model._reward.parameters()},
+            {'params': policy.model._Qs.parameters()},
+            {'params': policy.model._task_emb.parameters() if cfg.policy.multitask else []}
+        ]
+        self.pi_params = [{'params': policy.model._pi.parameters()}]
+
+        all_params = self.model_params + self.pi_params
+        super().__init__(all_params, lr=cfg.training.lr)
+

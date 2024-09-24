@@ -218,6 +218,7 @@ class TDMPC2Config(TDMPCConfig):
     discount_max: float = 0.995
     episode_length: int = 300
     entropy_coef: float = 1e-4
+    enc_lr_scale: float = 0.3
     pi_loss: str = "entropy"   # "entropy" or "mse"
 
     def __post_init__(self):

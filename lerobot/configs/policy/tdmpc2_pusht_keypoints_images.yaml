@@ -118,7 +118,7 @@ policy:
   max_random_shift_ratio: 0.0476
 
   # Loss coefficients.
-  entropy_coef: 1e-4
+  entropy_coef: 1
   pi_loss: "entropy"
   reward_coeff: 0.5
   expectile_weight: 0.9
