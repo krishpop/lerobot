@@ -18,6 +18,8 @@ import importlib
 import gymnasium as gym
 from omegaconf import DictConfig
 from gym_pusht.envs.pusht import PushTEnv, MMPushTEnv
+from gym_stacking.envs.stacking import CubeStacking_Env
+import gym_stacking.envs
 
 def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv | None:
     """Makes a gym vector environment according to the evaluation config.

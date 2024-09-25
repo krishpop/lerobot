@@ -58,11 +58,11 @@ def save_images_concurrently(imgs_array: numpy.array, out_dir: Path, max_workers
 
 def get_default_encoding() -> dict:
     """Returns the default ffmpeg encoding parameters used by `encode_video_frames`."""
-    signature = inspect.signature(encode_video_frames)
     return {
-        k: v.default
-        for k, v in signature.parameters.items()
-        if v.default is not inspect.Parameter.empty and k in ["vcodec", "pix_fmt", "g", "crf"]
+        "vcodec": "libx264",
+        "pix_fmt": "yuv420p",
+        "preset": "medium",
+        "crf": 23,
     }
 
 

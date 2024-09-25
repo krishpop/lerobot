@@ -166,24 +166,36 @@ def encode_video_frames(
     imgs_dir: Path,
     video_path: Path,
     fps: int,
-    vcodec: str = "libsvtav1",
+    vcodec: str = "libx264",
     pix_fmt: str = "yuv420p",
     g: int | None = 2,
     crf: int | None = 30,
     fast_decode: int = 0,
     log_level: str | None = "error",
     overwrite: bool = False,
+    img_format: str = "png",  # Add this parameter
 ) -> None:
     """More info on ffmpeg arguments tuning on `benchmark/video/README.md`"""
     video_path = Path(video_path)
     video_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Check if the directory exists and list its contents
+    if not imgs_dir.exists():
+        raise ValueError(f"Image directory does not exist: {imgs_dir}")
+    
+    image_files = sorted(imgs_dir.glob(f"*.{img_format}"))
+    if not image_files:
+        raise ValueError(f"No {img_format.upper()} files found in {imgs_dir}")
+
+    # Use the actual file names instead of a pattern
+    input_pattern = str(imgs_dir / f"%06d.{img_format}")
+
     ffmpeg_args = OrderedDict(
         [
             ("-f", "image2"),
             ("-r", str(fps)),
-            ("-i", str(imgs_dir / "frame_%06d.png")),
-            ("-vcodec", vcodec),
+            ("-i", input_pattern),
+            ("-c:v", vcodec),
             ("-pix_fmt", pix_fmt),
         ]
     )
@@ -207,14 +219,30 @@ def encode_video_frames(
         ffmpeg_args.append("-y")
 
     ffmpeg_cmd = ["ffmpeg"] + ffmpeg_args + [str(video_path)]
-    # redirect stdin to subprocess.DEVNULL to prevent reading random keyboard inputs from terminal
-    subprocess.run(ffmpeg_cmd, check=True, stdin=subprocess.DEVNULL)
+    logging.info(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
+
+    try:
+        # Use subprocess.Popen to capture output
+        process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        stdout, stderr = process.communicate()
+
+        if process.returncode != 0:
+            logging.error(f"FFmpeg error (return code {process.returncode}):")
+            logging.error(stderr)
+            raise subprocess.CalledProcessError(process.returncode, ffmpeg_cmd, stderr)
+
+    except subprocess.CalledProcessError as e:
+        logging.error(f"FFmpeg command failed: {e}")
+        logging.error(f"FFmpeg stderr: {e.stderr}")
+        raise
 
     if not video_path.exists():
         raise OSError(
             f"Video encoding did not work. File not found: {video_path}. "
-            f"Try running the command manually to debug: `{''.join(ffmpeg_cmd)}`"
+            f"Try running the command manually to debug: `{' '.join(ffmpeg_cmd)}`"
         )
+
+    logging.info(f"Video successfully encoded: {video_path}")
 
 
 @dataclass
