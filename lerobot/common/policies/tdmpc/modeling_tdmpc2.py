@@ -397,7 +397,7 @@ class TDMPC2Policy(nn.Module,
             z = self.model.latent_dynamics(z, actions[t], task_index)
             G += discount * reward
             discount *= self.config.discount
-        G = G + discount * self.model.Qs(z, self.model.pi(z, task_index)[1], task_index, return_type='avg')
+        G = G + discount * self.model.Qs(z, self.model.pi(z, task_index)[1], task_index, return_type='avg').squeeze(-1)
         return G
 
     @torch.no_grad()
