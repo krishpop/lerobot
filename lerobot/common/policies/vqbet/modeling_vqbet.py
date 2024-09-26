@@ -294,7 +294,7 @@ class VQBeTModel(nn.Module):
         self.state_projector = MLP(
             config.input_shapes["observation.state"][0], hidden_channels=[self.config.gpt_input_dim]
         )
-        self.rgb_feature_projector = MLP(self.rgb_encoder.feature_dim, hidden_channels=[self.config.gpt_input_dim])
+        self.rgb_feature_projector = MLP(self.rgb_encoder.feature_dim_per_image, hidden_channels=[self.config.gpt_input_dim])
 
         # GPT part of VQ-BeT
         self.policy = GPT(config)
@@ -319,7 +319,7 @@ class VQBeTModel(nn.Module):
         img_features = self.rgb_encoder(einops.rearrange(batch["observation.images"], "b s n ... -> (b s n) ..."))
         # Separate batch and sequence dims.
         img_features = einops.rearrange(
-            img_features, "(b s n) ... -> b s n ...", b=batch_size, s=n_obs_steps, n=self.num_images
+            img_features, "(b s) (n d) -> b s n d", b=batch_size, s=n_obs_steps, n=self.num_images
         )
 
         # Arrange prior and current observation step tokens as shown in the class docstring.
