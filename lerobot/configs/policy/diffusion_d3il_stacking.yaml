@@ -28,8 +28,6 @@ training:
     observation.images.bp_cam: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
     observation.images.inhand_cam: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
     observation.state: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
-    next.reward: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 0)]"
-    next.done: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 0)]"
     action: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1 - ${policy.n_obs_steps} + ${policy.horizon})]"
 
   # The original implementation doesn't sample frames for the last 7 steps,
