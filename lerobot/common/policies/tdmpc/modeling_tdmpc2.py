@@ -539,7 +539,7 @@ class TDMPC2Policy(nn.Module,
             pi_loss = (self.config.entropy_coef * log_pis - qs)
             mask = ~batch["observation.state_is_pad"]
         else:
-            pi_loss = F.mse_loss(action_preds, action, reduction="none").sum(-1)
+            pi_loss = F.mse_loss(action_preds[1:], action, reduction="none").sum(-1)
             mask = ~batch["action_is_pad"] * ~batch["observation.state_is_pad"][0]
 
         rho = torch.pow(self.config.temporal_decay_coeff, torch.arange(len(pi_loss), device=device)).unsqueeze(-1)
