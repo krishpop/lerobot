@@ -3,8 +3,9 @@
 # Defaults for training for the PushT dataset.
 
 seed: 100000
-dataset_repo_id: bhavnasud/pusht_keypoints_images
-critic_pretrained_policy_path: /scr/ksrini/lerobot/outputs/train/2024-09-21/02-48-40_pusht_tdmpc2_tdmpc2_episode_noise4_gaussian_std5/
+dataset_repo_id: lerobot/pusht
+critic_pretrained_policy_path: /juno/u/bsud2/lerobot_outputs/train/2024-09-27/04-06-30_pusht_tdmpc2_tdmpc2_pixels_keypoint_pos_diffusion50k/
+dataset_root: /juno/u/bsud2/lerobot_outputs/train/2024-09-24_12-45-27
 
 override_dataset_stats:
   # TODO(rcadene, alexander-soare): should we remove image stats as well? do we use a pretrained vision model?
