@@ -65,6 +65,15 @@ def get_default_encoding() -> dict:
         "crf": 23,
     }
 
+def get_default_encoding_old() -> dict:
+    """Returns the default ffmpeg encoding parameters used by `encode_video_frames`."""
+    signature = inspect.signature(encode_video_frames)
+    return {
+        k: v.default
+        for k, v in signature.parameters.items()
+        if v.default is not inspect.Parameter.empty and k in ["vcodec", "pix_fmt", "g", "crf"]
+    }
+
 
 def check_repo_id(repo_id: str) -> None:
     if len(repo_id.split("/")) != 2:

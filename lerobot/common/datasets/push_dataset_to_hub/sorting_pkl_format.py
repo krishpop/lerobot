@@ -139,6 +139,12 @@ def load_from_raw(
         ep_dict["episode_index"] = torch.full((num_frames,), ep_idx, dtype=torch.int64)
         ep_dict["frame_index"] = torch.arange(0, num_frames, 1)
         ep_dict["timestamp"] = torch.arange(0, num_frames, 1) / fps
+        ep_dict["next.reward"] = torch.zeros(num_frames)
+        ep_dict["next.reward"][-1] = 1
+        ep_dict["next.done"] = torch.zeros(num_frames, dtype=torch.bool)
+        ep_dict["next.done"][-1] = True
+        ep_dict["next.success"] = torch.zeros(num_frames, dtype=torch.bool)
+        ep_dict["next.success"][-1] = True
 
         ep_dicts.append(ep_dict)
 
@@ -172,6 +178,9 @@ def to_hf_dataset(data_dict, video):
         "frame_index": Value(dtype="int64", id=None),
         "timestamp": Value(dtype="float32", id=None),
         "index": Value(dtype="int64", id=None),
+        "next.reward": Value(dtype="float32", id=None),
+        "next.done": Value(dtype="bool", id=None),
+        "next.success": Value(dtype="bool", id=None),
     }
 
     if video:

@@ -45,7 +45,7 @@ policy:
   # Input / output structure.
   n_obs_steps: 5
   n_action_pred_token: 7
-  action_chunk_size: 5
+  action_chunk_size: 1
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?

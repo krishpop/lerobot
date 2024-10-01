@@ -70,6 +70,12 @@ def get_from_raw_to_lerobot_format_fn(raw_format: str):
         from lerobot.common.datasets.push_dataset_to_hub.dora_parquet_format import from_raw_to_lerobot_format
     elif raw_format == "xarm_pkl":
         from lerobot.common.datasets.push_dataset_to_hub.xarm_pkl_format import from_raw_to_lerobot_format
+    elif raw_format == "maniskill_h5":
+        from lerobot.common.datasets.push_dataset_to_hub.maniskill_h5_format import from_raw_to_lerobot_format
+    elif raw_format == "stacking_pkl":
+        from lerobot.common.datasets.push_dataset_to_hub.stacking_pkl_format import from_raw_to_lerobot_format
+    elif raw_format == "sorting_pkl":
+        from lerobot.common.datasets.push_dataset_to_hub.sorting_pkl_format import from_raw_to_lerobot_format
     elif raw_format == "cam_png":
         from lerobot.common.datasets.push_dataset_to_hub.cam_png_format import from_raw_to_lerobot_format
     else:
@@ -153,6 +159,7 @@ def push_dataset_to_hub(
     cache_dir: Path = Path("/tmp"),
     tests_data_dir: Path | None = None,
     encoding: dict | None = None,
+    num_boxes: int = 2,
 ):
     check_repo_id(repo_id)
     user_id, dataset_id = repo_id.split("/")
@@ -196,10 +203,16 @@ def push_dataset_to_hub(
         # raw_format = auto_find_raw_format(raw_dir)
 
     # convert dataset from original raw format to LeRobot format
-    from_raw_to_lerobot_format = get_from_raw_to_lerobot_format_fn(raw_format)
-    hf_dataset, episode_data_index, info = from_raw_to_lerobot_format(
-        raw_dir, videos_dir, fps, video, episodes, encoding
-    )
+    if raw_format == "sorting_pkl":
+        from_raw_to_lerobot_format = get_from_raw_to_lerobot_format_fn(raw_format)
+        hf_dataset, episode_data_index, info = from_raw_to_lerobot_format(
+            raw_dir, videos_dir, fps, video, episodes, encoding, num_boxes=num_boxes
+        )
+    else:
+        from_raw_to_lerobot_format = get_from_raw_to_lerobot_format_fn(raw_format)
+        hf_dataset, episode_data_index, info = from_raw_to_lerobot_format(
+            raw_dir, videos_dir, fps, video, episodes, encoding
+        )
 
     lerobot_dataset = LeRobotDataset.from_preloaded(
         repo_id=repo_id,
@@ -297,6 +310,12 @@ def main():
         type=int,
         default=1,
         help="Convert each episode of the raw dataset to an mp4 video. This option allows 60 times lower disk space consumption and 25 faster loading time during training.",
+    )
+    parser.add_argument(
+        "--num-boxes",
+        type=int,
+        default=2,
+        help="Number of boxes in the sorting dataset.",
     )
     parser.add_argument(
         "--batch-size",

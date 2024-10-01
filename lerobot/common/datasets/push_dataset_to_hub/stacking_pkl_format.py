@@ -94,6 +94,15 @@ def load_from_raw(
         ep_dict = {}
         ep_dict["observation.state"] = torch.from_numpy(input_state[:-1]).float()
         ep_dict["action"] = torch.from_numpy(action).float()
+        # Add next.reward to ep_dict
+        action_length = len(action)
+        next_reward = torch.zeros(action_length)
+        next_reward[-1] = 1.0  # Set the last reward to 1
+        ep_dict["next.reward"] = next_reward
+        ep_dict["next.done"] = torch.zeros(action_length, dtype=torch.bool)
+        ep_dict["next.done"][-1] = True
+        ep_dict["next.success"] = torch.zeros(action_length, dtype=torch.bool)
+        ep_dict["next.success"][-1] = True
 
         # Load and process BP camera images
         bp_imgs = sorted((bp_cam_dir / episode_name).glob("*.jpg"))
@@ -151,6 +160,9 @@ def to_hf_dataset(data_dict, video):
         "frame_index": Value(dtype="int64", id=None),
         "timestamp": Value(dtype="float32", id=None),
         "index": Value(dtype="int64", id=None),
+        "next.reward": Value(dtype="float32", id=None),
+        "next.done": Value(dtype="bool", id=None),
+        "next.success": Value(dtype="bool", id=None),
     }
 
     if video:
