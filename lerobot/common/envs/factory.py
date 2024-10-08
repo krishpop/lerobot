@@ -20,6 +20,7 @@ from omegaconf import DictConfig
 from gym_pusht.envs.pusht import PushTEnv, MMPushTEnv
 from gym_stacking.envs.stacking import CubeStacking_Env
 import gym_stacking.envs
+from .wrappers import LerobotManiskillWrapper
 
 def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv | None:
     """Makes a gym vector environment according to the evaluation config.
@@ -33,6 +34,10 @@ def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv
         return
 
     package_name = f"gym_{cfg.env.name}"
+    is_maniskill = False
+    if cfg.env.name.startswith("maniskill"):
+        is_maniskill = True
+        package_name = "mani_skill.envs"
 
     try:
         importlib.import_module(package_name)
@@ -49,12 +54,19 @@ def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv
         gym_kwgs["max_episode_steps"] = cfg.env.episode_length
 
     # batched version of the env that returns an observation of shape (b, c)
-    env_cls = gym.vector.AsyncVectorEnv if cfg.eval.use_async_envs else gym.vector.SyncVectorEnv
-    env = env_cls(
-        [
-            lambda: gym.make(gym_handle, disable_env_checker=True, **gym_kwgs)
-            for _ in range(n_envs if n_envs is not None else cfg.eval.batch_size)
-        ]
-    )
+    if is_maniskill:
+        from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
+
+        gym_handle = f"mani_skill.envs:{cfg.env.task}" 
+        #  wrappers=[LerobotManiskillWrapper], obs_mode="state_dict", render_mode="rgb_array"
+        env = ManiSkillVectorEnv(gym.make(gym_handle, disable_env_checker=True, **gym_kwgs), num_envs=n_envs)
+    else:
+        env_cls = gym.vector.AsyncVectorEnv if cfg.eval.use_async_envs else gym.vector.SyncVectorEnv
+        env = env_cls(
+            [
+                lambda: gym.make(gym_handle, disable_env_checker=True, **gym_kwgs)
+                for _ in range(n_envs if n_envs is not None else cfg.eval.batch_size)
+            ]
+        )
 
     return env

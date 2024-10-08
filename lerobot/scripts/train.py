@@ -385,7 +385,8 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
 
     logging.info("make_dataset")
     custom_transforms = None if not cfg.training.custom_transforms else create_custom_transforms(cfg.training.custom_transforms, logger.log_dir, cfg.training.get("custom_transforms_path"))
-    offline_dataset = make_dataset(cfg, root=cfg.dataset_root, custom_transforms=custom_transforms)
+    action_key = None if not cfg.action_key else cfg.action_key
+    offline_dataset = make_dataset(cfg, root=cfg.dataset_root, custom_transforms=custom_transforms, action_key=action_key)
     if isinstance(offline_dataset, MultiLeRobotDataset):
         logging.info(
             "Multiple datasets were provided. Applied the following index mapping to the provided datasets: "

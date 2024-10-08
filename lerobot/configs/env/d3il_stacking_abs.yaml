@@ -1,0 +1,18 @@
+# @package _global_
+
+fps: 33
+
+env:
+  name: stacking
+  task: stacking-v0
+  image_size: 96
+  state_dim: 8
+  action_dim: 8
+  fps: ${fps}
+  gym:
+    max_steps_per_episode: 500
+    if_vision: true
+    render: false
+    self_start: true
+
+action_key: action_abs

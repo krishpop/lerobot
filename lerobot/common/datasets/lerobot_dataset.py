@@ -51,6 +51,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         custom_transforms: Callable | None = None,
         delta_timestamps: dict[list[float]] | None = None,
         video_backend: str | None = None,
+        action_key: str | None = None,
     ):
         super().__init__()
         self.repo_id = repo_id
@@ -59,6 +60,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.image_transforms = image_transforms
         self.custom_transforms = custom_transforms
         self.delta_timestamps = delta_timestamps
+        self.action_key = action_key
         # load data from hub or locally when root is provided
         # TODO(rcadene, aliberts): implement faster transfer
         # https://huggingface.co/docs/huggingface_hub/en/guides/download#faster-downloads
@@ -162,6 +164,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
         if self.custom_transforms is not None:
             item = self.custom_transforms(item)
+
+        if self.action_key is not None:
+            item["action"] = item[self.action_key]
 
         return item
 

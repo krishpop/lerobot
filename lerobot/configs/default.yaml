@@ -33,6 +33,7 @@ seed: ???
 # datsets are provided.
 dataset_repo_id: lerobot/pusht
 dataset_root: null
+action_key: null
 video_backend: pyav
 
 distillation:
