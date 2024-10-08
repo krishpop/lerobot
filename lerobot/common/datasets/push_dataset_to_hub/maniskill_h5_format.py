@@ -40,7 +40,7 @@ def load_from_h5(h5_file: Path, videos_dir: Path, fps: int, video: bool, episode
             rewards = traj['rewards'][:]
             env_state = np.concatenate([
                 traj['env_states/actors/cube'],  # pos, quat, vel, ang_vel
-                traj['env_states/actors/goal_region'][:, :7],  # pos and quat only
+                traj['env_states/actors/goal_region'][:, :3],  # pos only (always on the table, at 0, np.pi/2, 0 orientation)
             ], axis=1)
             
             num_frames = len(actions)
@@ -143,7 +143,7 @@ def from_raw_to_lerobot_format(
     check_format(h5_file)
 
     if fps is None:
-        fps = 30  # Default to 30 FPS if not specified
+        fps = 20  # Default to 30 FPS if not specified
 
     data_dict = load_from_h5(h5_file, videos_dir, fps, video, episodes, encoding)
     hf_dataset = to_hf_dataset(data_dict, video)

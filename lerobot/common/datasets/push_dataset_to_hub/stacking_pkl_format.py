@@ -29,6 +29,7 @@ from lerobot.common.datasets.lerobot_dataset import CODEBASE_VERSION
 from lerobot.common.datasets.push_dataset_to_hub.utils import (
     concatenate_episodes,
     get_default_encoding,
+    quat2euler,
     save_images_concurrently,
 )
 from lerobot.common.datasets.utils import (
@@ -82,18 +83,42 @@ def load_from_raw(
         with open(state_file, "rb") as f:
             state_data = pickle.load(f)
 
+        # extract relevant keys from the state_data dictionary
         robot_des_j_pos = state_data['robot']['des_j_pos']
+        robot_j_pos = state_data['robot']['j_pos']
         robot_gripper = np.expand_dims(state_data['robot']['gripper_width'], -1)
-        
-        input_state = np.concatenate((robot_des_j_pos, robot_gripper), axis=-1)
-        vel_state = robot_des_j_pos[1:] - robot_des_j_pos[:-1]
-        action = np.concatenate((vel_state, robot_gripper[1:]), axis=-1)
 
-        num_frames = len(input_state) - 1
+        red_box_pos = state_data['red-box']['pos'][:, :2]
+        red_box_quat = np.tan(quat2euler(state_data['red-box']['quat']))
+
+        green_box_pos = state_data['green-box']['pos'][:, :2]
+        green_box_quat = np.tan(quat2euler(state_data['green-box']['quat']))
+
+        blue_box_pos = state_data['blue-box']['pos'][:, :2]
+        blue_box_quat = np.tan(quat2euler(state_data['blue-box']['quat']))
+
+        # Combine the information to create the observation state
+        env_state = np.concatenate([
+            red_box_pos,
+            red_box_quat,
+            green_box_pos,
+            green_box_quat,
+            blue_box_pos,
+            blue_box_quat,
+        ], axis=-1)
+        
+        input_state = np.concatenate((robot_j_pos, robot_gripper), axis=-1)
+        vel_state = robot_des_j_pos - robot_j_pos
+        action = np.concatenate((vel_state, robot_gripper), axis=-1)
+        abs_action = np.concatenate((robot_des_j_pos, robot_gripper), axis=-1)
+
+        num_frames = len(input_state)
 
         ep_dict = {}
-        ep_dict["observation.state"] = torch.from_numpy(input_state[:-1]).float()
+        ep_dict["observation.state"] = torch.from_numpy(input_state).float()
+        ep_dict["observation.environment_state"] = torch.from_numpy(env_state).float()
         ep_dict["action"] = torch.from_numpy(action).float()
+        ep_dict["action_abs"] = torch.from_numpy(abs_action).float()
         # Add next.reward to ep_dict
         action_length = len(action)
         next_reward = torch.zeros(action_length)
@@ -105,7 +130,7 @@ def load_from_raw(
         ep_dict["next.success"][-1] = True
 
         # Load and process BP camera images
-        bp_imgs = sorted((bp_cam_dir / episode_name).glob("*.jpg"))
+        bp_imgs = sorted((bp_cam_dir / episode_name).glob("*.jpg"), key=lambda x: int(x.stem))
         bp_img_key = "observation.images.bp_cam"
         if video:
             bp_video_path = process_images_to_video(bp_imgs, videos_dir, bp_img_key, ep_idx, fps, encoding)
@@ -114,7 +139,7 @@ def load_from_raw(
             ep_dict[bp_img_key] = [PILImage.open(img_path) for img_path in bp_imgs[:num_frames]]
 
         # Load and process inhand camera images
-        inhand_imgs = sorted((inhand_cam_dir / episode_name).glob("*.jpg"))
+        inhand_imgs = sorted((inhand_cam_dir / episode_name).glob("*.jpg"), key=lambda x: int(x.stem))
         inhand_img_key = "observation.images.inhand_cam"
         if video:
             inhand_video_path = process_images_to_video(inhand_imgs, videos_dir, inhand_img_key, ep_idx, fps, encoding)
@@ -155,7 +180,9 @@ def process_images_to_video(img_paths, videos_dir, key, ep_idx, fps, encoding):
 def to_hf_dataset(data_dict, video):
     features = {
         "observation.state": Sequence(feature=Value(dtype="float32", id=None)),
+        "observation.environment_state": Sequence(feature=Value(dtype="float32", id=None)),
         "action": Sequence(feature=Value(dtype="float32", id=None)),
+        "action_abs": Sequence(feature=Value(dtype="float32", id=None)),
         "episode_index": Value(dtype="int64", id=None),
         "frame_index": Value(dtype="int64", id=None),
         "timestamp": Value(dtype="float32", id=None),
@@ -208,8 +235,8 @@ if __name__ == "__main__":
     import os
     d3il_dir = Path(os.environ.get("D3IL_SIM_DATASET_DIR", "/home/ksrini/Temporary_D3IL/"))
     raw_dir = d3il_dir / "environments/dataset/data/stacking/vision_data"
-    videos_dir = None
-    video = False  
+    videos_dir =  Path("data") / "demos"
+    video = True  
     episodes = [0, 1, 2]
     hf_dataset, episode_data_index, info = from_raw_to_lerobot_format(raw_dir, videos_dir, video=video, episodes=episodes)
     print(hf_dataset)

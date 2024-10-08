@@ -16,6 +16,7 @@
 import inspect
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from scipy.spatial.transform import Rotation as R
 
 import numpy
 import PIL
@@ -81,3 +82,75 @@ def check_repo_id(repo_id: str) -> None:
             f"""`repo_id` is expected to contain a community or user id `/` the name of the dataset
             (e.g. 'lerobot/pusht'), but contains '{repo_id}'."""
         )
+
+
+def quat2euler(quat):
+    """
+    Convert a quaternion or an array of quaternions to Euler angles.
+    The Euler angles are returned in the order: roll (X), pitch (Y), yaw (Z).
+
+    This function expects quaternions in the [w, x, y, z] format.
+
+    Parameters:
+    -----------
+    quat : array_like
+        Quaternion(s) to convert. Shape can be (4,) for a single quaternion
+        or (..., 4) for multiple quaternions. The expected order is [w, x, y, z].
+
+    Returns:
+    --------
+    euler : ndarray
+        Euler angles in radians. Shape is (..., 3).
+    """
+    # Define a small epsilon to handle numerical precision
+    _EPS4 = numpy.finfo(float).eps * 4.0
+
+    # Convert input to numpy array with float64 dtype
+    quat = numpy.asarray(quat, dtype=numpy.float64)
+
+    # Ensure the quaternion has the correct shape
+    if quat.ndim == 1:
+        quat = quat[numpy.newaxis, :]  # Convert to 2D array for consistency
+    elif quat.ndim > 2 or quat.shape[-1] != 4:
+        raise ValueError(f"Invalid quaternion shape {quat.shape}. Expected shape (..., 4).")
+
+    # Create a Rotation object from quaternions
+    rotation = R.from_quat(quat, scalar_first=True)
+
+    # Convert to rotation matrices
+    mat = rotation.as_matrix()  # Shape (..., 3, 3)
+
+    # Compute cy = sqrt(mat[...,2,2]^2 + mat[...,1,2]^2)
+    cy = numpy.sqrt(mat[..., 2, 2] ** 2 + mat[..., 1, 2] ** 2)
+
+    # Determine where cy is significant to avoid division by zero
+    condition = cy > _EPS4
+
+    # Initialize Euler angles array
+    if len(mat.shape) == 3:
+        euler = numpy.empty((mat.shape[0], 3), dtype=numpy.float64)
+    else:
+        euler = numpy.empty(mat.shape[:-1] + (3,), dtype=numpy.float64)
+
+    # Compute yaw (Z axis rotation)
+    euler[..., 2] = numpy.where(
+        condition,
+        -numpy.arctan2(mat[..., 0, 1], mat[..., 0, 0]),
+        -numpy.arctan2(-mat[..., 1, 0], mat[..., 1, 1]),
+    )
+
+    # Compute pitch (Y axis rotation)
+    euler[..., 1] = -numpy.arctan2(mat[..., 0, 2], cy)
+
+    # Compute roll (X axis rotation)
+    euler[..., 0] = numpy.where(
+        condition,
+        -numpy.arctan2(mat[..., 1, 2], mat[..., 2, 2]),
+        0.0  # Gimbal lock: roll is set to zero
+    )
+
+    # If the input was a single quaternion, return a 1D array
+    if euler.shape[0] == 1:
+        return euler[0]
+
+    return euler

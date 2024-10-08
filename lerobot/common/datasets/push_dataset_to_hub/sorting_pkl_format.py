@@ -12,6 +12,7 @@ from lerobot.common.datasets.lerobot_dataset import CODEBASE_VERSION
 from lerobot.common.datasets.push_dataset_to_hub.utils import (
     concatenate_episodes,
     get_default_encoding,
+    quat2euler,
     save_images_concurrently,
 )
 from lerobot.common.datasets.utils import (
@@ -19,7 +20,6 @@ from lerobot.common.datasets.utils import (
     hf_transform_to_torch,
 )
 from lerobot.common.datasets.video_utils import VideoFrame, encode_video_frames
-from scipy.spatial.transform import Rotation
 
 def check_format(raw_dir):
     state_dir = raw_dir / "state"
@@ -59,11 +59,6 @@ def load_from_raw(
     ep_dicts = []
     ep_ids = episodes if episodes else range(num_episodes)
 
-    def quat2euler(x):
-        r = Rotation.from_quat(x)
-        euler = r.as_euler('xyz', degrees=False)
-        return euler
-
     for ep_idx, selected_ep_idx in tqdm.tqdm(enumerate(ep_ids)):
         state_file = state_files[selected_ep_idx]
         episode_name = state_file.stem
@@ -73,53 +68,56 @@ def load_from_raw(
 
         robot_des_pos = env_state['robot']['des_c_pos'][:, :2]
         robot_c_pos = env_state['robot']['c_pos'][:, :2]
+        robot_j_pos = env_state['robot']['j_pos'][:, :2]
 
         if num_boxes == 2:
             red_box1_pos = env_state['red-box1']['pos'][:, :2]
-            red_box1_quat = np.tan(quat2euler(env_state['red-box1']['quat'])[:, -1:])
+            red_box1_quat = np.tan(quat2euler(env_state['red-box1']['quat']))
             blue_box1_pos = env_state['blue-box1']['pos'][:, :2]
-            blue_box1_quat = np.tan(quat2euler(env_state['blue-box1']['quat'])[:, -1:])
+            blue_box1_quat = np.tan(quat2euler(env_state['blue-box1']['quat']))
             input_state = np.concatenate((robot_des_pos, robot_c_pos, red_box1_pos, red_box1_quat,
                                           blue_box1_pos, blue_box1_quat), axis=-1)
         elif num_boxes == 4:
             red_box1_pos = env_state['red-box1']['pos'][:, :2]
-            red_box1_quat = np.tan(quat2euler(env_state['red-box1']['quat'])[:, -1:])
+            red_box1_quat = np.tan(quat2euler(env_state['red-box1']['quat']))
             red_box2_pos = env_state['red-box2']['pos'][:, :2]
-            red_box2_quat = np.tan(quat2euler(env_state['red-box2']['quat'])[:, -1:])
+            red_box2_quat = np.tan(quat2euler(env_state['red-box2']['quat']))
             blue_box1_pos = env_state['blue-box1']['pos'][:, :2]
-            blue_box1_quat = np.tan(quat2euler(env_state['blue-box1']['quat'])[:, -1:])
+            blue_box1_quat = np.tan(quat2euler(env_state['blue-box1']['quat']))
             blue_box2_pos = env_state['blue-box2']['pos'][:, :2]
-            blue_box2_quat = np.tan(quat2euler(env_state['blue-box2']['quat'])[:, -1:])
+            blue_box2_quat = np.tan(quat2euler(env_state['blue-box2']['quat']))
             input_state = np.concatenate((robot_des_pos, robot_c_pos, red_box1_pos, red_box1_quat,
                                           red_box2_pos, red_box2_quat, blue_box1_pos, blue_box1_quat,
                                           blue_box2_pos, blue_box2_quat), axis=-1)
         elif num_boxes == 6:
             red_box1_pos = env_state['red-box1']['pos'][:, :2]
-            red_box1_quat = np.tan(quat2euler(env_state['red-box1']['quat'])[:, -1:])
+            red_box1_quat = np.tan(quat2euler(env_state['red-box1']['quat']))
             red_box2_pos = env_state['red-box2']['pos'][:, :2]
-            red_box2_quat = np.tan(quat2euler(env_state['red-box2']['quat'])[:, -1:])
+            red_box2_quat = np.tan(quat2euler(env_state['red-box2']['quat']))
             red_box3_pos = env_state['red-box3']['pos'][:, :2]
-            red_box3_quat = np.tan(quat2euler(env_state['red-box3']['quat'])[:, -1:])
+            red_box3_quat = np.tan(quat2euler(env_state['red-box3']['quat']))
             blue_box1_pos = env_state['blue-box1']['pos'][:, :2]
-            blue_box1_quat = np.tan(quat2euler(env_state['blue-box1']['quat'])[:, -1:])
+            blue_box1_quat = np.tan(quat2euler(env_state['blue-box1']['quat']))
             blue_box2_pos = env_state['blue-box2']['pos'][:, :2]
-            blue_box2_quat = np.tan(quat2euler(env_state['blue-box2']['quat'])[:, -1:])
+            blue_box2_quat = np.tan(quat2euler(env_state['blue-box2']['quat']))
             blue_box3_pos = env_state['blue-box3']['pos'][:, :2]
-            blue_box3_quat = np.tan(quat2euler(env_state['blue-box3']['quat'])[:, -1:])
+            blue_box3_quat = np.tan(quat2euler(env_state['blue-box3']['quat']))
             input_state = np.concatenate((robot_des_pos, robot_c_pos, red_box1_pos, red_box1_quat,
                                           red_box2_pos, red_box2_quat, red_box3_pos, red_box3_quat,
                                           blue_box1_pos, blue_box1_quat, blue_box2_pos, blue_box2_quat,
                                           blue_box3_pos, blue_box3_quat), axis=-1)
 
-        vel_state = robot_des_pos[1:] - robot_des_pos[:-1]
+        vel_state = robot_des_pos - robot_j_pos
+        abs_action = robot_des_pos
         num_frames = len(vel_state)
 
         ep_dict = {}
-        ep_dict["observation.state"] = torch.from_numpy(input_state[:-1]).float()
+        ep_dict["observation.state"] = torch.from_numpy(input_state).float()
         ep_dict["action"] = torch.from_numpy(vel_state).float()
+        ep_dict["action_abs"] = torch.from_numpy(abs_action).float()
 
         # Load and process BP camera images
-        bp_imgs = sorted((bp_cam_dir / episode_name).glob("*.jpg"))
+        bp_imgs = sorted((bp_cam_dir / episode_name).glob("*.jpg"), key=lambda x: int(x.stem))
         bp_img_key = "observation.images.bp_cam"
         if video:
             bp_video_path = process_images_to_video(bp_imgs, videos_dir, bp_img_key, ep_idx, fps, encoding)
@@ -128,7 +126,7 @@ def load_from_raw(
             ep_dict[bp_img_key] = [PILImage.open(img_path) for img_path in bp_imgs[:num_frames]]
 
         # Load and process inhand camera images
-        inhand_imgs = sorted((inhand_cam_dir / episode_name).glob("*.jpg"))
+        inhand_imgs = sorted((inhand_cam_dir / episode_name).glob("*.jpg"), key=lambda x: int(x.stem))
         inhand_img_key = "observation.images.inhand_cam"
         if video:
             inhand_video_path = process_images_to_video(inhand_imgs, videos_dir, inhand_img_key, ep_idx, fps, encoding)
@@ -174,6 +172,7 @@ def to_hf_dataset(data_dict, video):
     features = {
         "observation.state": Sequence(feature=Value(dtype="float32", id=None)),
         "action": Sequence(feature=Value(dtype="float32", id=None)),
+        "action_abs": Sequence(feature=Value(dtype="float32", id=None)),
         "episode_index": Value(dtype="int64", id=None),
         "frame_index": Value(dtype="int64", id=None),
         "timestamp": Value(dtype="float32", id=None),
