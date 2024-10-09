@@ -14,5 +14,6 @@ env:
     if_vision: true
     render: false
     self_start: true
+    action_type: absolute
 
 action_key: action_abs
