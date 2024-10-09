@@ -29,10 +29,11 @@ training:
     observation.images.inhand_cam: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
     observation.state: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
     action: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1 - ${policy.n_obs_steps} + ${policy.horizon})]"
+    action_abs: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1 - ${policy.n_obs_steps} + ${policy.horizon})]"
 
   # The original implementation doesn't sample frames for the last 7 steps,
   # which avoids excessive padding and leads to improved training results.
-  drop_n_last_frames: 7  # ${policy.horizon} - ${policy.n_action_steps} - ${policy.n_obs_steps} + 1
+  drop_n_last_frames: 0  # ${policy.horizon} - ${policy.n_action_steps} - ${policy.n_obs_steps} + 1
 
 eval:
   n_episodes: 50
@@ -78,7 +79,8 @@ policy:
   use_film_scale_modulation: True
   # Noise scheduler.
   noise_scheduler_type: DDPM
-  num_train_timesteps: 16
+  num_train_timesteps: 100
+  num_inference_steps: 16
   beta_schedule: squaredcos_cap_v2
   beta_start: 0.0001
   beta_end: 0.02
