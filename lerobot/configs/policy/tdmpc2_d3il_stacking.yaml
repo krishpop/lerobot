@@ -25,7 +25,7 @@ training:
 
   delta_timestamps:
     observation.images.bp_cam: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
-    observation.images.inhand_cam: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
+    observation.environment_state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
     observation.state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
     action: "[i / ${fps} for i in range(${policy.horizon})]"
     next.reward: "[i / ${fps} for i in range(${policy.horizon})]"
@@ -45,7 +45,7 @@ policy:
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
     observation.images.bp_cam: [3, 96, 96]
-    observation.images.inhand_cam: [3, 96, 96]
+    observation.environment_state: [15]
     observation.state: ["${env.state_dim}"]
   output_shapes:
     action: ["${env.action_dim}"]
@@ -53,7 +53,7 @@ policy:
   # Normalization / Unnormalization
   input_normalization_modes:
     observation.images.bp_cam: mean_std
-    observation.images.inhand_cam: mean_std
+    observation.environment_state: min_max
     # Use min_max normalization just because it's more standard.
     observation.state: min_max
   output_normalization_modes:

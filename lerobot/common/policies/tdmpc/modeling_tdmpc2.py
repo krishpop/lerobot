@@ -256,14 +256,15 @@ class TDMPC2Policy(nn.Module,
     def select_action(self, batch: dict[str, Tensor]) -> Tensor:
         """Select a single action given environment observations."""
         batch = self.normalize_inputs(batch)
+        batch = dict(batch)
         if self._use_image:
-            batch["observation.image"] = batch[self.input_image_key]
+            batch["observation.image"] = batch.pop(self.input_image_key)
 
         self._queues = populate_queues(self._queues, batch)
 
         # When the action queue is depleted, populate it again by querying the policy.
         if len(self._queues["action"]) == 0:
-            batch = {key: torch.stack(list(self._queues[key]), dim=1) for key in batch}
+            batch = {key: torch.stack(list(self._queues[key]), dim=1) for key in batch if key in self._queues}
 
             # Remove the time dimensions as it is not handled yet.
             for key in batch:
