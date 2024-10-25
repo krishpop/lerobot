@@ -42,7 +42,7 @@ training:
   delta_timestamps:
     observation.images.bp_cam: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
     observation.images.inhand_cam: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
-    observation.state: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
+    # observation.state: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
     action: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, ${policy.n_action_pred_token} + ${policy.action_chunk_size} - 1)]"
 
 eval:
@@ -61,7 +61,7 @@ policy:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
     observation.images.bp_cam: [3, 96, 96]
     observation.images.inhand_cam: [3, 96, 96]
-    observation.state: ["${env.state_dim}"]
+    # observation.state: ["${env.state_dim}"]
   output_shapes:
     action: ["${env.action_dim}"]
 
@@ -69,17 +69,17 @@ policy:
   input_normalization_modes:
     observation.images.bp_cam: mean_std
     observation.images.inhand_cam: mean_std
-    observation.state: min_max
-  output_normalization_modes:
-    action: min_max
+    # observation.state: min_max
+  # output_normalization_modes:
+  #   action: min_max
 
   # Architecture / modeling.
   # Vision backbone.
   vision_backbone: resnet18
   crop_shape: [84, 84]
   crop_is_random: True
-  pretrained_backbone_weights: null
-  use_group_norm: True
+  pretrained_backbone_weights: ResNet18_Weights.IMAGENET1K_V1
+  use_group_norm: False
   spatial_softmax_num_keypoints: 32
   # VQ-VAE
   n_vqvae_training_steps: ${training.n_vqvae_training_steps}
