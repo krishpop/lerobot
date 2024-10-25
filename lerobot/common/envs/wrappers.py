@@ -1,11 +1,12 @@
 import gymnasium as gym
 import numpy as np
 import torch
+from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 from gymnasium import spaces
 
-class LerobotManiskillWrapper(gym.ObservationWrapper):
-    def __init__(self, env):
-        super().__init__(env)
+class LerobotManiskillWrapper(ManiSkillVectorEnv):
+    def __init__(self, env, num_envs, **kwargs):
+        super().__init__(env, num_envs, **kwargs)
         
         # Assuming the original observation space is a Dict
         assert isinstance(self.observation_space, spaces.Dict)
