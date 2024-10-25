@@ -68,17 +68,17 @@ policy:
   input_normalization_modes:
     observation.images.bp_cam: mean_std
     observation.images.inhand_cam: mean_std
-    observation.state: min_max
-  output_normalization_modes:
-    action: min_max
+  #   observation.state: min_max
+  # output_normalization_modes:
+  #   action: min_max
 
   # Architecture / modeling.
   # Vision backbone.
   vision_backbone: resnet18
   crop_shape: null
   crop_is_random: False
-  pretrained_backbone_weights: null
-  use_group_norm: True
+  pretrained_backbone_weights: true
+  use_group_norm: false
   spatial_softmax_num_keypoints: 32
   # Unet.
   down_dims: [512, 1024, 2048]
