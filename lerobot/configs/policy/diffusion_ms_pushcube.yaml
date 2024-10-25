@@ -5,13 +5,7 @@
 #       https://github.com/huggingface/lerobot/pull/134 for more details.
 
 seed: 100000
-dataset_repo_id: krishpop/d3il_stacking
-
-override_dataset_stats:
-  observation.image:
-    # stats from imagenet, since we use a pretrained vision model
-    mean: [[[0.485]], [[0.456]], [[0.406]]]  # (c,1,1)
-    std: [[[0.229]], [[0.224]], [[0.225]]]  # (c,1,1)
+dataset_repo_id: krishpop/maniskill_pushcube
 
 training:
   offline_steps: 2000000
@@ -20,9 +14,9 @@ training:
   save_freq: 25000
   save_checkpoint: true
 
-  batch_size: 64
+  batch_size: 512
   grad_clip_norm: 10
-  lr: 1.0e-5
+  lr: 5.0e-4
   lr_scheduler: cosine
   lr_warmup_steps: 500
   adam_betas: [0.95, 0.999]
@@ -31,15 +25,14 @@ training:
   online_steps_between_rollouts: 1
 
   delta_timestamps:
-    observation.images.bp_cam: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
-    observation.images.inhand_cam: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
-    # observation.state: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
+    observation.image: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
+    observation.state: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
+    observation.environment_state: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"
     action: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1 - ${policy.n_obs_steps} + ${policy.horizon})]"
-    action_abs: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1 - ${policy.n_obs_steps} + ${policy.horizon})]"
 
   # The original implementation doesn't sample frames for the last 7 steps,
   # which avoids excessive padding and leads to improved training results.
-  drop_n_last_frames: 0  # ${policy.horizon} - ${policy.n_action_steps} - ${policy.n_obs_steps} + 1
+  drop_n_last_frames: 7  # ${policy.horizon} - ${policy.n_action_steps} - ${policy.n_obs_steps} + 1
 
 eval:
   n_episodes: 50
@@ -55,25 +48,25 @@ policy:
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
-    observation.images.bp_cam: [3, 96, 96]
-    observation.images.inhand_cam: [3, 96, 96]
-    # observation.state: ["${env.state_dim}"]
+    observation.image: [3, "${env.image_size}", "${env.image_size}"]
+    observation.state: ["${env.state_dim}"]
+    observation.environment_state: [20]
   output_shapes:
     action: ["${env.action_dim}"]
 
   # Normalization / Unnormalization
   input_normalization_modes:
-    observation.images.bp_cam: mean_std
-    observation.images.inhand_cam: mean_std
+    observation.image: mean_std
     observation.state: min_max
+    observation.environment_state: min_max
   output_normalization_modes:
     action: min_max
 
   # Architecture / modeling.
   # Vision backbone.
   vision_backbone: resnet18
-  crop_shape: null
-  crop_is_random: False
+  crop_shape: [112, 112]
+  crop_is_random: True
   pretrained_backbone_weights: null
   use_group_norm: True
   spatial_softmax_num_keypoints: 32
@@ -94,7 +87,7 @@ policy:
   clip_sample_range: 1.0
 
   # Inference
-  num_inference_steps: 16
+  num_inference_steps: null  # if not provided, defaults to `num_train_timesteps`
 
   # Loss computation
   do_mask_loss_for_padding: false
