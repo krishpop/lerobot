@@ -1,0 +1,15 @@
+# @package _global_
+
+fps: 33
+
+env:
+  name: sorting
+  task: sorting-v0
+  image_size: 96
+  state_dim: 8
+  action_dim: 8
+  fps: ${fps}
+  gym:
+    max_steps_per_episode: 500
+    if_vision: true
+    render: false
