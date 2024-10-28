@@ -20,7 +20,8 @@ from omegaconf import DictConfig
 from gym_pusht.envs.pusht import PushTEnv, MMPushTEnv
 from gym_stacking.envs.stacking import CubeStacking_Env
 import gym_stacking.envs
-from .wrappers import LerobotManiskillWrapper
+import gym_sorting.envs
+#from .wrappers import LerobotManiskillWrapper
 
 def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv | None:
     """Makes a gym vector environment according to the evaluation config.
