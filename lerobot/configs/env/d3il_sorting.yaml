@@ -10,6 +10,6 @@ env:
   action_dim: 2
   fps: ${fps}
   gym:
-    max_steps_per_episode: 500
+    max_steps_per_episode: 1000
     if_vision: true
     render: false
