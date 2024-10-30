@@ -145,6 +145,7 @@ class DiffusionConfig:
     prediction_type: str = "epsilon"
     clip_sample: bool = True
     clip_sample_range: float = 1.0
+    noise_scales: tuple[float, ...] = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
 
     # Inference
     num_inference_steps: int | None = None
@@ -190,7 +191,7 @@ class DiffusionConfig:
             raise ValueError(
                 f"`prediction_type` must be one of {supported_prediction_types}. Got {self.prediction_type}."
             )
-        supported_noise_schedulers = ["DDPM", "DDIM"]
+        supported_noise_schedulers = ["DDPM", "DDIM", "DDPM_custom"]
         if self.noise_scheduler_type not in supported_noise_schedulers:
             raise ValueError(
                 f"`noise_scheduler_type` must be one of {supported_noise_schedulers}. "

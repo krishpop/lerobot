@@ -87,7 +87,7 @@ policy:
   diffusion_step_embed_dim: 128
   use_film_scale_modulation: True
   # Noise scheduler.
-  noise_scheduler_type: DDPM
+  noise_scheduler_type: DDPM_custom
   num_train_timesteps: 100
   beta_schedule: squaredcos_cap_v2
   beta_start: 0.0001
@@ -95,6 +95,7 @@ policy:
   prediction_type: epsilon # epsilon / sample
   clip_sample: False
   #clip_sample_range: 1.0
+  noise_scales: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.01]
 
   # Inference
   num_inference_steps: 16

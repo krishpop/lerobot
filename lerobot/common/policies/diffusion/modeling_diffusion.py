@@ -42,6 +42,43 @@ from lerobot.common.policies.utils import (
     populate_queues,
 )
 
+class CustomDDPMScheduler(DDPMScheduler):
+    def __init__(self, noise_scales, *args, **kwargs):
+        """
+        Initialize the custom DDPMScheduler with specific noise scales for each dimension.
+
+        Args:
+            noise_scales (torch.Tensor): A tensor of shape (action_dim,) specifying the noise scale for each action dimension.
+            *args, **kwargs: Additional arguments for the base DDPMScheduler class.
+        """
+        super().__init__(*args, **kwargs)
+        self.noise_scales = noise_scales
+
+    def add_noise(
+        self,
+        original_samples: torch.Tensor,
+        noise: torch.Tensor,
+        timesteps: torch.IntTensor,
+    ) -> torch.Tensor:
+        # Make sure alphas_cumprod and timestep have same device and dtype as original_samples
+        # Move the self.alphas_cumprod to device to avoid redundant CPU to GPU data movement
+        # for the subsequent add_noise calls
+        self.alphas_cumprod = self.alphas_cumprod.to(device=original_samples.device)
+        alphas_cumprod = self.alphas_cumprod.to(dtype=original_samples.dtype)
+        timesteps = timesteps.to(original_samples.device)
+
+        sqrt_alpha_prod = alphas_cumprod[timesteps] ** 0.5
+        sqrt_alpha_prod = sqrt_alpha_prod.flatten()
+        while len(sqrt_alpha_prod.shape) < len(original_samples.shape):
+            sqrt_alpha_prod = sqrt_alpha_prod.unsqueeze(-1)
+
+        sqrt_one_minus_alpha_prod = (1 - alphas_cumprod[timesteps]) ** 0.5
+        sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
+        while len(sqrt_one_minus_alpha_prod.shape) < len(original_samples.shape):
+            sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.unsqueeze(-1)
+        scaled_noise = noise * torch.tensor(self.noise_scales, device=noise.device).view(1, 1, noise.shape[2])
+        noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * scaled_noise
+        return noisy_samples
 
 class DiffusionPolicy(
     nn.Module,
@@ -183,6 +220,8 @@ def _make_noise_scheduler(name: str, **kwargs: dict) -> DDPMScheduler | DDIMSche
         return DDPMScheduler(**kwargs)
     elif name == "DDIM":
         return DDIMScheduler(**kwargs)
+    elif name == "DDPM_custom":
+        return CustomDDPMScheduler(**kwargs)
     else:
         raise ValueError(f"Unsupported noise scheduler type {name}")
 
@@ -216,7 +255,9 @@ class DiffusionModel(nn.Module):
             clip_sample=config.clip_sample,
             clip_sample_range=config.clip_sample_range,
             prediction_type=config.prediction_type,
+            noise_scales=config.noise_scales
         )
+        self.noise_scales = config.noise_scales
 
         if config.num_inference_steps is None:
             self.num_inference_steps = self.noise_scheduler.config.num_train_timesteps
@@ -237,6 +278,8 @@ class DiffusionModel(nn.Module):
             device=device,
             generator=generator,
         )
+
+        sample *= torch.tensor(self.noise_scales, device=sample.device).view(1, 1, sample.shape[2])
 
         self.noise_scheduler.set_timesteps(self.num_inference_steps)
 
