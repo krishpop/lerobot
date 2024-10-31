@@ -13,3 +13,4 @@ env:
     max_steps_per_episode: 1000
     if_vision: true
     render: false
+    self_start: true
