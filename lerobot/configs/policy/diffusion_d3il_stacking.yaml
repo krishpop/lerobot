@@ -95,7 +95,7 @@ policy:
   prediction_type: epsilon # epsilon / sample
   clip_sample: False
   #clip_sample_range: 1.0
-  noise_scales: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.01]
+  noise_scales: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.001]
 
   # Inference
   num_inference_steps: 16

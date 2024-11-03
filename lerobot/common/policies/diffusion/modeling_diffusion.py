@@ -30,9 +30,10 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 import torchvision
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler, DDPMSchedulerOutput
 from huggingface_hub import PyTorchModelHubMixin
 from torch import Tensor, nn
+from typing import List, Optional, Tuple, Union
 
 from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.common.policies.normalize import Normalize, Unnormalize
@@ -54,31 +55,86 @@ class CustomDDPMScheduler(DDPMScheduler):
         super().__init__(*args, **kwargs)
         self.noise_scales = noise_scales
 
-    def add_noise(
+    def step(
         self,
-        original_samples: torch.Tensor,
-        noise: torch.Tensor,
-        timesteps: torch.IntTensor,
-    ) -> torch.Tensor:
-        # Make sure alphas_cumprod and timestep have same device and dtype as original_samples
-        # Move the self.alphas_cumprod to device to avoid redundant CPU to GPU data movement
-        # for the subsequent add_noise calls
-        self.alphas_cumprod = self.alphas_cumprod.to(device=original_samples.device)
-        alphas_cumprod = self.alphas_cumprod.to(dtype=original_samples.dtype)
-        timesteps = timesteps.to(original_samples.device)
+        model_output: torch.Tensor,
+        timestep: int,
+        sample: torch.Tensor,
+        generator=None,
+        return_dict: bool = True,
+        variance_noise: torch.Tensor = None,
+    ) -> Union[DDPMSchedulerOutput, Tuple]:
+        t = timestep
 
-        sqrt_alpha_prod = alphas_cumprod[timesteps] ** 0.5
-        sqrt_alpha_prod = sqrt_alpha_prod.flatten()
-        while len(sqrt_alpha_prod.shape) < len(original_samples.shape):
-            sqrt_alpha_prod = sqrt_alpha_prod.unsqueeze(-1)
+        prev_t = self.previous_timestep(t)
 
-        sqrt_one_minus_alpha_prod = (1 - alphas_cumprod[timesteps]) ** 0.5
-        sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
-        while len(sqrt_one_minus_alpha_prod.shape) < len(original_samples.shape):
-            sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.unsqueeze(-1)
-        scaled_noise = noise * torch.tensor(self.noise_scales, device=noise.device).view(1, 1, noise.shape[2])
-        noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * scaled_noise
-        return noisy_samples
+        if model_output.shape[1] == sample.shape[1] * 2 and self.variance_type in ["learned", "learned_range"]:
+            model_output, predicted_variance = torch.split(model_output, sample.shape[1], dim=1)
+        else:
+            predicted_variance = None
+
+        # 1. compute alphas, betas
+        alpha_prod_t = self.alphas_cumprod[t]
+        alpha_prod_t_prev = self.alphas_cumprod[prev_t] if prev_t >= 0 else self.one
+        beta_prod_t = 1 - alpha_prod_t
+        beta_prod_t_prev = 1 - alpha_prod_t_prev
+        current_alpha_t = alpha_prod_t / alpha_prod_t_prev
+        current_beta_t = 1 - current_alpha_t
+
+        # 2. compute predicted original sample from predicted noise also called
+        # "predicted x_0" of formula (15) from https://arxiv.org/pdf/2006.11239.pdf
+        if self.config.prediction_type == "epsilon":
+            pred_original_sample = (sample - beta_prod_t ** (0.5) * model_output) / alpha_prod_t ** (0.5)
+        elif self.config.prediction_type == "sample":
+            pred_original_sample = model_output
+        elif self.config.prediction_type == "v_prediction":
+            pred_original_sample = (alpha_prod_t**0.5) * sample - (beta_prod_t**0.5) * model_output
+        else:
+            raise ValueError(
+                f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample` or"
+                " `v_prediction`  for the DDPMScheduler."
+            )
+
+        # 3. Clip or threshold "predicted x_0"
+        if self.config.thresholding:
+            pred_original_sample = self._threshold_sample(pred_original_sample)
+        elif self.config.clip_sample:
+            pred_original_sample = pred_original_sample.clamp(
+                -self.config.clip_sample_range, self.config.clip_sample_range
+            )
+
+        # 4. Compute coefficients for pred_original_sample x_0 and current sample x_t
+        # See formula (7) from https://arxiv.org/pdf/2006.11239.pdf
+        pred_original_sample_coeff = (alpha_prod_t_prev ** (0.5) * current_beta_t) / beta_prod_t
+        current_sample_coeff = current_alpha_t ** (0.5) * beta_prod_t_prev / beta_prod_t
+
+        # 5. Compute predicted previous sample µ_t
+        # See formula (7) from https://arxiv.org/pdf/2006.11239.pdf
+        pred_prev_sample = pred_original_sample_coeff * pred_original_sample + current_sample_coeff * sample
+
+        # 6. Add noise
+        variance = 0
+        if t > 0:
+            device = model_output.device
+            if variance_noise is None:
+                variance_noise = randn_tensor(
+                    model_output.shape, generator=generator, device=device, dtype=model_output.dtype
+                )
+            if self.variance_type == "fixed_small_log":
+                variance = self._get_variance(t, predicted_variance=predicted_variance) * variance_noise
+            elif self.variance_type == "learned_range":
+                variance = self._get_variance(t, predicted_variance=predicted_variance)
+                variance = torch.exp(0.5 * variance) * variance_noise
+            else:
+                variance = (self._get_variance(t, predicted_variance=predicted_variance) ** 0.5) * variance_noise
+
+        pred_prev_sample = pred_prev_sample + variance
+
+        if not return_dict:
+            return (pred_prev_sample,)
+
+        return DDPMSchedulerOutput(prev_sample=pred_prev_sample, pred_original_sample=pred_original_sample)
+
 
 class DiffusionPolicy(
     nn.Module,
@@ -291,7 +347,9 @@ class DiffusionModel(nn.Module):
                 global_cond=global_cond,
             )
             # Compute previous image: x_t -> x_t-1
-            sample = self.noise_scheduler.step(model_output, t, sample, generator=generator).prev_sample
+            variance_noise = torch.randn(model_output.shape, device=model_output.device, dtype=model_output.dtype)
+            variance_noise *= torch.tensor(self.noise_scales, device=variance_noise.device).view(1, 1, variance_noise.shape[2])
+            sample = self.noise_scheduler.step(model_output, t, sample, generator=generator, variance_noise=variance_noise).prev_sample
 
         return sample
 
@@ -373,6 +431,8 @@ class DiffusionModel(nn.Module):
         trajectory = batch["action"]
         # Sample noise to add to the trajectory.
         eps = torch.randn(trajectory.shape, device=trajectory.device)
+        eps *= torch.tensor(self.noise_scales, device=eps.device).view(1, 1, eps.shape[2])
+
         # Sample a random noising timestep for each item in the batch.
         timesteps = torch.randint(
             low=0,
