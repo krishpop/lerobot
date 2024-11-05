@@ -21,6 +21,8 @@ from gym_pusht.envs.pusht import PushTEnv, MMPushTEnv
 from gym_stacking.envs.stacking import CubeStacking_Env
 import gym_stacking.envs
 import gym_sorting.envs
+import gym_avoiding.envs
+
 #from .wrappers import LerobotManiskillWrapper
 
 def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv | None:
