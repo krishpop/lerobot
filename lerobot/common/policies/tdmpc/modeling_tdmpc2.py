@@ -352,7 +352,7 @@ class TDMPC2Policy(nn.Module,
         zs[0] = self.model.encode(current_observation, task_index)
         reward_preds = torch.empty(horizon, batch_size, self.config.num_bins, device=device)
         for t in range(horizon):
-            zs[t + 1], reward_preds[t] = self.model.latent_dynamics_and_reward(zs[t], action[:, t], task_index)
+            zs[t + 1], reward_preds[t] = self.model.latent_dynamics_and_reward(zs[t], action[t], task_index)
 
         # Compute Q and V value predictions based on the latent rollout.
         _zs = zs[:-1]
