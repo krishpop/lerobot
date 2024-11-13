@@ -45,7 +45,7 @@ training:
       noise_granularity: episode
       apply_to: 
         - action
-      std: 0.01
+      std: 0.001
       mean: 0
       noise_levels: 4
       input_shape: ${eval:"[${env.action_dim}]"}  # add chunk_size if using item granularity
