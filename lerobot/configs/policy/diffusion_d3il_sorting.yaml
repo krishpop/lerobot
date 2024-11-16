@@ -68,9 +68,9 @@ policy:
   input_normalization_modes:
     observation.images.bp_cam: mean_std
     observation.images.inhand_cam: mean_std
-  #   observation.state: min_max
-  # output_normalization_modes:
-  #   action: min_max
+    observation.state: min_max
+  output_normalization_modes:
+    action: min_max
 
   # Architecture / modeling.
   # Vision backbone.
@@ -94,7 +94,7 @@ policy:
   beta_end: 0.02
   prediction_type: epsilon # epsilon / sample
   clip_sample: False
-  #clip_sample_range: 1.0
+  clip_sample_range: 1.0
 
   # Inference
   num_inference_steps: 16
