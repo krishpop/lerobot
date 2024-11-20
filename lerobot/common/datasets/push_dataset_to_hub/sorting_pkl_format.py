@@ -68,7 +68,6 @@ def load_from_raw(
 
         robot_des_pos = env_state['robot']['des_c_pos'][:, :2]
         robot_c_pos = env_state['robot']['c_pos'][:, :2]
-        robot_j_pos = env_state['robot']['j_pos'][:, :2]
 
         if num_boxes == 2:
             red_box1_pos = env_state['red-box1']['pos'][:, :2]
@@ -107,14 +106,14 @@ def load_from_raw(
                                           blue_box1_pos, blue_box1_quat, blue_box2_pos, blue_box2_quat,
                                           blue_box3_pos, blue_box3_quat), axis=-1)
 
-        vel_state = robot_des_pos - robot_j_pos
+        vel_state = robot_des_pos[1:] - robot_des_pos[:-1]
         abs_action = robot_des_pos
         num_frames = len(vel_state)
 
         ep_dict = {}
-        ep_dict["observation.state"] = torch.from_numpy(input_state).float()
+        ep_dict["observation.state"] = torch.from_numpy(input_state[:-1]).float()
         ep_dict["action"] = torch.from_numpy(vel_state).float()
-        ep_dict["action_abs"] = torch.from_numpy(abs_action).float()
+        ep_dict["action_abs"] = torch.from_numpy(abs_action[:-1]).float()
 
         # Load and process BP camera images
         bp_imgs = sorted((bp_cam_dir / episode_name).glob("*.jpg"), key=lambda x: int(x.stem))
