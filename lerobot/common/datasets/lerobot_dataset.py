@@ -42,6 +42,7 @@ DATA_DIR = Path(os.environ["DATA_DIR"]) if "DATA_DIR" in os.environ else None
 
 
 class LeRobotDataset(torch.utils.data.Dataset):
+    action_key = None
     def __init__(
         self,
         repo_id: str,
