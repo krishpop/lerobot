@@ -3,7 +3,7 @@
 fps: 33
 
 env:
-  name: sorting-state
+  name: sorting
   task: sorting-v0
   image_size: 96
   state_dim: 14
