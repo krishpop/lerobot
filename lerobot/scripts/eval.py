@@ -599,7 +599,7 @@ def main(
 
     with torch.no_grad(), torch.autocast(device_type=device.type) if hydra_cfg.use_amp else nullcontext():
         test_contexts = None
-        if hydra_cfg.eval.test_contexts_path:
+        if hydra_cfg.eval.get('test_contexts_path', None):
             with open(hydra_cfg.eval.test_contexts_path, "rb") as file:
                 test_contexts = pickle.load(file)
         info = eval_policy(
