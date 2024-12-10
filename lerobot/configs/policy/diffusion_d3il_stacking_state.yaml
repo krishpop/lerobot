@@ -44,8 +44,8 @@ policy:
 
   # Input / output structure.
   n_obs_steps: 2
-  horizon: 8
-  n_action_steps: 2
+  horizon: 16
+  n_action_steps: 8
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
@@ -56,10 +56,10 @@ policy:
 
   # Normalization / Unnormalization
   input_normalization_modes:
-    # observation.state: mean_std
+    observation.state: min_max
     observation.environment_state: min_max
-  # output_normalization_modes:
-    # action: min_max
+  output_normalization_modes:
+    action: min_max
 
   # Architecture / modeling.
   # Vision backbone.
@@ -79,8 +79,8 @@ policy:
   noise_scheduler_type: DDPM
   num_train_timesteps: 100
   beta_schedule: squaredcos_cap_v2
-  beta_start: 0.0001
-  beta_end: 0.001
+  beta_start: 0.00005
+  beta_end: 0.02
   prediction_type: epsilon # epsilon / sample
   clip_sample: False
   clip_sample_range: 1.0
