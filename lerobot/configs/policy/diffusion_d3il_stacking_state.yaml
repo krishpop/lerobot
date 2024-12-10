@@ -56,10 +56,10 @@ policy:
 
   # Normalization / Unnormalization
   input_normalization_modes:
-    observation.state: mean_std
+    # observation.state: mean_std
     observation.environment_state: mean_std
-  output_normalization_modes:
-    action: min_max
+  # output_normalization_modes:
+    # action: min_max
 
   # Architecture / modeling.
   # Vision backbone.
