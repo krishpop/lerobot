@@ -57,7 +57,7 @@ policy:
   # Normalization / Unnormalization
   input_normalization_modes:
     # observation.state: mean_std
-    observation.environment_state: mean_std
+    observation.environment_state: min_max
   # output_normalization_modes:
     # action: min_max
 
@@ -80,7 +80,7 @@ policy:
   num_train_timesteps: 100
   beta_schedule: squaredcos_cap_v2
   beta_start: 0.0001
-  beta_end: 0.02
+  beta_end: 0.001
   prediction_type: epsilon # epsilon / sample
   clip_sample: False
   clip_sample_range: 1.0
