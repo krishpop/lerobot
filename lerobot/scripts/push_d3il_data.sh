@@ -1,11 +1,16 @@
-python lerobot/scripts/push_dataset_to_hub.py --raw-dir /home/ksrini/Temporary_D3IL/environments/dataset/data/stacking/vision_data \
-	--raw-format stacking_pkl --repo-id krishpop/d3il_stacking \
-        --local-dir data/krishpop/d3il_stacking \
-        --batch-size 128 --force-override 1
+# python lerobot/scripts/push_dataset_to_hub.py --raw-dir /home/ksrini/Temporary_D3IL/environments/dataset/data/stacking/vision_data \
+# 	--raw-format stacking_pkl --repo-id krishpop/d3il_stacking \
+#         --local-dir data/krishpop/d3il_stacking \
+#         --batch-size 128 --force-override 1
 
 python lerobot/scripts/push_dataset_to_hub.py --raw-dir /home/ksrini/Temporary_D3IL/environments/dataset/data/sorting/2_boxes \
 	--raw-format sorting_pkl --repo-id krishpop/d3il_sorting_2boxes \
         --local-dir data/krishpop/d3il_sorting_2boxes --num-boxes 2 \
+        --batch-size 128 --force-override 1
+
+python lerobot/scripts/push_dataset_to_hub.py --raw-dir /home/ksrini/Temporary_D3IL/environments/dataset/data/avoiding \
+	--raw-format avoiding_pkl --repo-id krishpop/d3il_avoiding \
+        --local-dir data/krishpop/d3il_avoiding \
         --batch-size 128 --force-override 1
 
 python lerobot/scripts/push_dataset_to_hub.py --raw-dir /home/ksrini/Temporary_D3IL/environments/dataset/data/sorting/4_boxes \

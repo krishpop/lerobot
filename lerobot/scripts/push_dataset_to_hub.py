@@ -76,6 +76,8 @@ def get_from_raw_to_lerobot_format_fn(raw_format: str):
         from lerobot.common.datasets.push_dataset_to_hub.stacking_pkl_format import from_raw_to_lerobot_format
     elif raw_format == "sorting_pkl":
         from lerobot.common.datasets.push_dataset_to_hub.sorting_pkl_format import from_raw_to_lerobot_format
+    elif raw_format == "avoiding_pkl":
+        from lerobot.common.datasets.push_dataset_to_hub.avoiding_pkl_format import from_raw_to_lerobot_format
     elif raw_format == "cam_png":
         from lerobot.common.datasets.push_dataset_to_hub.cam_png_format import from_raw_to_lerobot_format
     else:

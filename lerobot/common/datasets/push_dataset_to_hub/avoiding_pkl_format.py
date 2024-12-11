@@ -76,19 +76,19 @@ def load_from_raw(
         ep_dict["timestamp"] = torch.arange(0, num_frames, 1) / 30  # Assuming 30 FPS, adjust if needed
 
         # Assume `bp_cam_dir` and `inhand_cam_dir` are provided or defined similarly.
-        bp_imgs = sorted((bp_cam_dir / episode_name).glob("*.jpg"), key=lambda x: int(x.stem))
-        if video:   
-            bp_video_path = process_images_to_video(bp_imgs, videos_dir, "observation.images.bp_cam", ep_idx, fps, encoding)
-            ep_dict["observation.images.bp_cam"] = [{"path": f"videos/{bp_video_path.name}", "timestamp": i / fps} for i in range(num_frames)]
-        else:
-            ep_dict["observation.images.bp_cam"] = [PILImage.open(img_path) for img_path in bp_imgs[:num_frames]]
+        # bp_imgs = sorted((bp_cam_dir / episode_name).glob("*.jpg"), key=lambda x: int(x.stem))
+        # if video:   
+        #     bp_video_path = process_images_to_video(bp_imgs, videos_dir, "observation.images.bp_cam", ep_idx, fps, encoding)
+        #     ep_dict["observation.images.bp_cam"] = [{"path": f"videos/{bp_video_path.name}", "timestamp": i / fps} for i in range(num_frames)]
+        # else:
+        #     ep_dict["observation.images.bp_cam"] = [PILImage.open(img_path) for img_path in bp_imgs[:num_frames]]
 
-        inhand_imgs = sorted((inhand_cam_dir / episode_name).glob("*.jpg"), key=lambda x: int(x.stem))
-        if video:
-            inhand_video_path = process_images_to_video(inhand_imgs, videos_dir, "observation.images.inhand_cam", ep_idx, fps, encoding)
-            ep_dict["observation.images.inhand_cam"] = [{"path": f"videos/{inhand_video_path.name}", "timestamp": i / fps} for i in range(num_frames)]
-        else:
-            ep_dict["observation.images.inhand_cam"] = [PILImage.open(img_path) for img_path in inhand_imgs[:num_frames]]
+        # inhand_imgs = sorted((inhand_cam_dir / episode_name).glob("*.jpg"), key=lambda x: int(x.stem))
+        # if video:
+        #     inhand_video_path = process_images_to_video(inhand_imgs, videos_dir, "observation.images.inhand_cam", ep_idx, fps, encoding)
+        #     ep_dict["observation.images.inhand_cam"] = [{"path": f"videos/{inhand_video_path.name}", "timestamp": i / fps} for i in range(num_frames)]
+        # else:
+        #     ep_dict["observation.images.inhand_cam"] = [PILImage.open(img_path) for img_path in inhand_imgs[:num_frames]]
 
 
         ep_dicts.append(ep_dict)
@@ -117,7 +117,7 @@ def process_images_to_video(img_paths, videos_dir, key, ep_idx, fps, encoding):
     return video_path
     
 
-def to_hf_dataset(data_dict, video):
+def to_hf_dataset(data_dict):
     features = {
         "observation.state": Sequence(feature=Value(dtype="float32", id=None)),
         "action": Sequence(feature=Value(dtype="float32", id=None)),
@@ -130,12 +130,12 @@ def to_hf_dataset(data_dict, video):
         "next.success": Value(dtype="bool", id=None),
     }
 
-    if video:
-        features["observation.images.bp_cam"] = VideoFrame()
-        features["observation.images.inhand_cam"] = VideoFrame()
-    else:
-        features["observation.images.bp_cam"] = Image()
-        features["observation.images.inhand_cam"] = Image()
+    # if video:
+    #     features["observation.images.bp_cam"] = VideoFrame()
+    #     features["observation.images.inhand_cam"] = VideoFrame()
+    # else:
+    #     features["observation.images.bp_cam"] = Image()
+    #     features["observation.images.inhand_cam"] = Image()
 
     hf_dataset = Dataset.from_dict(data_dict, features=Features(features))
     hf_dataset.set_transform(hf_transform_to_torch)
@@ -158,7 +158,7 @@ def from_raw_to_lerobot_format(
     info = {
         "codebase_version": CODEBASE_VERSION,
         "fps": fps,
-        "video": video,
+        "video": False,
     }
 
     return hf_dataset, episode_data_index, info
