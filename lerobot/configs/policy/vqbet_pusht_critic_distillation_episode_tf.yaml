@@ -1,6 +1,6 @@
 # @package _global_
 
-critic_pretrained_policy_path: outputs/train/2024-08-21/13-33-52_pusht_tdmpc_offline+online_exp_diffusion_rollouts_clip_grad_5/
+critic_pretrained_policy_path: /scr/ksrini/lerobot/outputs/train/2024-09-21/02-48-40_pusht_tdmpc2_tdmpc2_episode_noise4_gaussian_std5
 
 distillation:
   critic_use_advantage: true
@@ -24,6 +24,7 @@ override_dataset_stats:
     max: [511.0, 511.0]
 
 training:
+  custom_transforms_path: /scr/ksrini/lerobot/outputs/train/2024-09-21/02-48-40_pusht_tdmpc2_tdmpc2_episode_noise4_gaussian_std5/custom_transforms.pt
   critic_distillation: true
   offline_steps: 1000000
   online_steps: 0
@@ -47,6 +48,17 @@ training:
   bet_weight_decay: 2e-4
   bet_learning_rate: 5.5e-5
   bet_betas: [0.9, 0.999]
+
+  custom_transforms:
+    action_noise:
+      noise_type: gaussian
+      noise_granularity: episode
+      apply_to: 
+        - action
+      std: 5
+      mean: 0
+      noise_levels: 4
+      input_shape: ${eval:"[${env.action_dim}]"}  # add chunk_size if using item granularity
 
   delta_timestamps:
     observation.image: "[i / ${fps} for i in range(1 - ${policy.n_obs_steps}, 1)]"

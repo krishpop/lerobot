@@ -124,7 +124,7 @@ class VQBeTPolicy(
         action = self._queues["action"].popleft()
         return action
 
-    def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
+    def forward(self, batch: dict[str, Tensor], return_predicted_action: bool = False) -> dict[str, Tensor]:
         """Run the batch through the model and compute the loss for training or validation."""
         batch = self.normalize_inputs(batch)
         batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
@@ -145,7 +145,7 @@ class VQBeTPolicy(
                 "recon_l1_error": recon_l1_error,
             }
         # if Residual VQ is already trained, VQ-BeT trains its GPT and bin prediction head / offset prediction head parts.
-        _, loss_dict = self.vqbet(batch, rollout=False)
+        _, loss_dict = self.vqbet(batch, rollout=False, return_predicted_action=return_predicted_action)
 
         return loss_dict
 
@@ -294,7 +294,7 @@ class VQBeTModel(nn.Module):
         self.state_projector = MLP(
             config.input_shapes["observation.state"][0], hidden_channels=[self.config.gpt_input_dim]
         )
-        self.rgb_feature_projector = MLP(self.rgb_encoder.feature_dim, hidden_channels=[self.config.gpt_input_dim])
+        self.rgb_feature_projector = MLP(self.rgb_encoder.feature_dim_per_image, hidden_channels=[self.config.gpt_input_dim])
 
         # GPT part of VQ-BeT
         self.policy = GPT(config)
@@ -309,7 +309,7 @@ class VQBeTModel(nn.Module):
         )
         self._task_emb = nn.Embedding(3, 512, max_norm=1)  # TODO@bsud: remove hardcoded 3
 
-    def forward(self, batch: dict[str, Tensor], rollout: bool) -> Tensor:
+    def forward(self, batch: dict[str, Tensor], rollout: bool, return_predicted_action: bool = False) -> Tensor:
         # Input validation.
         assert set(batch).issuperset({"observation.state", "observation.images"})
         batch_size, n_obs_steps = batch["observation.state"].shape[:2]
@@ -319,7 +319,7 @@ class VQBeTModel(nn.Module):
         img_features = self.rgb_encoder(einops.rearrange(batch["observation.images"], "b s n ... -> (b s n) ..."))
         # Separate batch and sequence dims.
         img_features = einops.rearrange(
-            img_features, "(b s n) ... -> b s n ...", b=batch_size, s=n_obs_steps, n=self.num_images
+            img_features, "(b s) (n d) -> b s n d", b=batch_size, s=n_obs_steps, n=self.num_images
         )
 
         # Arrange prior and current observation step tokens as shown in the class docstring.
@@ -369,10 +369,11 @@ class VQBeTModel(nn.Module):
         else:
             output = batch["action"][:, self.select_target_actions_indices]
             loss = self.action_head.loss_fn(action_head_output, output, reduction="mean")
-            loss["action_head_output"] = action_head_output
-            loss["action_head_output"]["predicted_action_chunk"] = action_head_output["predicted_action"][
-                :, n_obs_steps - 1, :
-            ].reshape(batch_size, self.config.action_chunk_size, -1)
+            if return_predicted_action:
+                loss["action_head_output"] = action_head_output
+                loss["action_head_output"]["predicted_action_chunk"] = action_head_output["predicted_action"][
+                    :, n_obs_steps - 1, :
+                ].reshape(batch_size, self.config.action_chunk_size, -1)
             return action_head_output, loss
 
 
@@ -695,7 +696,7 @@ class VQBeTRgbEncoder(nn.Module):
         # Set up optional preprocessing.
         if config.crop_shape is not None:
             self.do_crop = True
-            # Always use center crop for eval
+            # Always use center crop for evaluation
             self.center_crop = torchvision.transforms.CenterCrop(config.crop_shape)
             if config.crop_is_random:
                 self.maybe_random_crop = torchvision.transforms.RandomCrop(config.crop_shape)
@@ -705,55 +706,84 @@ class VQBeTRgbEncoder(nn.Module):
             self.do_crop = False
 
         # Set up backbone.
-        backbone_model = getattr(torchvision.models, config.vision_backbone)(weights=config.pretrained_backbone_weights)
-        # Note: This assumes that the layer4 feature map is children()[-3]
-        # TODO(alexander-soare): Use a safer alternative.
+        backbone_model = getattr(torchvision.models, config.vision_backbone)(
+            weights=config.pretrained_backbone_weights
+        )
+        # Note: This assumes that the layer4 feature map is children()[-2]
         self.backbone = nn.Sequential(*(list(backbone_model.children())[:-2]))
         if config.use_group_norm:
             if config.pretrained_backbone_weights:
-                raise ValueError("You can't replace BatchNorm in a pretrained model without ruining the weights!")
+                raise ValueError(
+                    "You can't replace BatchNorm in a pretrained model without ruining the weights!"
+                )
             self.backbone = _replace_submodules(
                 root_module=self.backbone,
                 predicate=lambda x: isinstance(x, nn.BatchNorm2d),
-                func=lambda x: nn.GroupNorm(num_groups=x.num_features // 16, num_channels=x.num_features),
+                func=lambda x: nn.GroupNorm(
+                    num_groups=x.num_features // 16, num_channels=x.num_features
+                ),
             )
 
         # Set up pooling and final layers.
         # Use a dry run to get the feature map shape.
-        # The dummy input should take the number of image channels from `config.input_shapes` and it should
-        # use the height and width from `config.crop_shape` if it is provided, otherwise it should use the
-        # height and width from `config.input_shapes`.
         image_keys = [k for k in config.input_shapes if k.startswith("observation.image")]
-        assert len(image_keys) == 1
-        image_key = image_keys[0]
-        dummy_input_h_w = config.crop_shape if config.crop_shape is not None else config.input_shapes[image_key][1:]
-        dummy_input = torch.zeros(size=(1, config.input_shapes[image_key][0], *dummy_input_h_w))
+        num_images = len(image_keys)
+        self.num_images = num_images  # Save for later use in the forward method
+
+        # Assuming all images have the same shape
+        channels = config.input_shapes[image_keys[0]][0]
+        dummy_input_h_w = (
+            config.crop_shape if config.crop_shape is not None else config.input_shapes[image_keys[0]][1:]
+        )
+
+        # Create dummy input for one image
+        dummy_input = torch.zeros(size=(1, channels, *dummy_input_h_w))
         with torch.inference_mode():
             dummy_feature_map = self.backbone(dummy_input)
         feature_map_shape = tuple(dummy_feature_map.shape[1:])
+
+        # Set up pooling for individual image feature maps
         self.pool = SpatialSoftmax(feature_map_shape, num_kp=config.spatial_softmax_num_keypoints)
-        self.feature_dim = config.spatial_softmax_num_keypoints * 2
-        self.out = nn.Linear(config.spatial_softmax_num_keypoints * 2, self.feature_dim)
+
+        # Adjust feature dimension to account for multiple images
+        self.feature_dim_per_image = config.spatial_softmax_num_keypoints * 2
+        self.feature_dim = self.feature_dim_per_image * num_images
+
+        self.out = nn.Linear(self.feature_dim, self.feature_dim)
         self.relu = nn.ReLU()
 
     def forward(self, x: Tensor) -> Tensor:
         """
         Args:
-            x: (B, C, H, W) image tensor with pixel values in [0, 1].
+            x: (B_total, C, H, W) image tensor with pixel values in [0, 1],
+               where B_total = batch_size * sequence_length * num_images
         Returns:
-            (B, D) image feature.
+            (batch_size * sequence_length, D) image feature.
         """
-        # Preprocess: maybe crop (if it was set up in the __init__).
+        # Preprocess: apply optional cropping
         if self.do_crop:
-            if self.training:  # noqa: SIM108
-                x = self.maybe_random_crop(x)
+            if self.training:
+                # Apply random crop to each image individually
+                x = torch.stack([self.maybe_random_crop(img) for img in x], dim=0)
             else:
-                # Always use center crop for eval.
-                x = self.center_crop(x)
-        # Extract backbone feature.
-        x = torch.flatten(self.pool(self.backbone(x)), start_dim=1)
-        # Final linear layer with non-linearity.
-        x = self.relu(self.out(x))
+                # Always use center crop for eval
+                x = torch.stack([self.center_crop(img) for img in x], dim=0)
+
+        # Extract features using the backbone
+        x = self.backbone(x)
+
+        # Apply spatial softmax pooling
+        x = self.pool(x)
+
+        # Flatten the features
+        x = torch.flatten(x, start_dim=1)  # Shape: (B_total, feature_dim_per_image)
+
+        # Reshape to group features from multiple images per sample
+        total_batches = x.size(0) // self.num_images
+        x = x.view(total_batches, self.num_images * self.feature_dim_per_image)
+
+        # Final linear layer with non-linearity
+        x = self.relu(self.out(x))  # Shape: (total_batches, feature_dim)
         return x
 
 

@@ -121,7 +121,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
-env/
+# env/
 venv/
 env.bak/
 venv.bak/
@@ -151,4 +151,4 @@ dmypy.json
 cython_debug/
 pusht_dataset_scale*
 **multirun/
-datasets/
+./data/

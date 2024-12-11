@@ -1,0 +1,14 @@
+# @package _global_
+
+fps: 20
+
+env:
+  name: maniskill_stackcube
+  task: StackCube-v1
+  image_size: 128
+  state_dim: 18
+  action_dim: 8
+  fps: ${fps}
+  gym:
+    render_mode: "rgb_array"
+    # reconfiguration_freq: 1

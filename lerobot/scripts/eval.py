@@ -61,6 +61,7 @@ from huggingface_hub.utils._errors import RepositoryNotFoundError
 from huggingface_hub.utils._validators import HFValidationError
 from torch import Tensor, nn
 from tqdm import trange
+import pickle
 
 from lerobot.common.datasets.factory import make_dataset
 from lerobot.common.envs.factory import make_env
@@ -72,6 +73,111 @@ from lerobot.common.policies.utils import get_device_from_parameters
 from lerobot.common.utils.io_utils import write_video
 from lerobot.common.utils.utils import get_safe_torch_device, init_hydra_config, init_logging, set_global_seed
 
+def rollout_with_contexts(
+    env: gym.vector.VectorEnv,
+    policy: Policy,
+    return_observations: bool = False,
+    render_callback: Callable[[gym.vector.VectorEnv], None] | None = None,
+    enable_progbar: bool = False,
+    test_contexts: list | None = None,
+):
+    assert isinstance(policy, nn.Module), "Policy must be a PyTorch nn module."
+    device = get_device_from_parameters(policy)
+
+    all_actions = []
+    all_rewards = []
+    all_successes = []
+    all_dones = []
+    max_steps = env.call("_max_episode_steps")[0]
+    progbar = trange(
+        len(test_contexts),
+        desc=f"Running rollout with at most {max_steps} steps on {len(test_contexts)} contexts",
+        disable=not enable_progbar,
+        leave=False,
+    )
+    for i, context in enumerate(test_contexts):
+        context_successes = []
+        context_actions = []
+        context_rewards = []
+        context_dones = [] 
+        # Reset the policy and environments.
+        policy.reset()
+        print("evaling context ", i)
+        observation, info = env.reset(seed=None, options={"random": False, "context": context})
+        if render_callback is not None:
+            render_callback(env)
+
+        step = 0
+        # Keep track of which environments are done.
+        done = np.array([False] * env.num_envs)
+        while not np.all(done):
+            # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
+            observation = preprocess_observation(observation)
+            observation = {key: observation[key].to(device, non_blocking=True) for key in observation}
+
+            with torch.inference_mode():
+                action = policy.select_action(observation)
+
+            # Convert to CPU / numpy.
+            action = action.to("cpu").numpy()
+            assert action.ndim == 2, "Action dimensions should be (batch, action_dim)"
+
+            # Apply the next action.
+            observation, reward, terminated, truncated, info = env.step(action)
+            if render_callback is not None:
+                render_callback(env)
+
+            # VectorEnv stores is_success in `info["final_info"][env_index]["is_success"]`. "final_info" isn't
+            # available of none of the envs finished.
+            if "final_info" in info:
+                successes = [info["is_success"] if info is not None else False for info in info["final_info"]]
+            else:
+                successes = [False] * env.num_envs
+
+            # Keep track of which environments are done so far.
+            done = terminated | truncated | done
+
+            context_actions.append(torch.from_numpy(action))
+            context_rewards.append(torch.from_numpy(reward))
+            context_dones.append(torch.from_numpy(done))
+            context_successes.append(torch.tensor(successes)) # [(b, 1), (b, 1), (b, 1),...] (length n_steps for the env that took the longest)
+            step += 1
+        
+        # to ensure consistent sizes for each context
+        while len(context_successes) < max_steps:
+            context_actions.append(context_actions[-1])
+            context_rewards.append(context_rewards[-1])
+            context_dones.append(context_dones[-1])
+            context_successes.append(context_successes[-1])
+        context_successes = torch.stack(context_successes, dim=1) # (b, n_steps)
+        print("context successes shape ", context_successes.shape)
+        context_actions = torch.stack(context_actions, dim=1)
+        context_rewards = torch.stack(context_rewards, dim=1)
+        context_dones = torch.stack(context_dones, dim=1)
+        all_successes.append(context_successes) # [(b, n_steps_1), (b, n_steps_2), ...] (length n_contexts)
+        all_actions.append(context_actions)
+        all_rewards.append(context_rewards)
+        all_dones.append(context_dones)
+        print("all successes ", [item.shape for item in all_successes])
+        print("all actions ", [item.shape for item in all_actions])
+        running_success_rate = (
+            einops.reduce(torch.stack(all_successes, dim=0), "c b n -> (c b)", "any").numpy().mean()
+        )
+        progbar.set_postfix({"running_success_rate": f"{running_success_rate.item() * 100:.1f}%"})
+        progbar.update()
+    # Stack the sequence along the first dimension so that we have (batch, sequence, *) tensors.
+    all_successes = torch.stack(all_successes, dim=0) # (c, b, n_steps)
+    all_actions = torch.stack(all_actions, dim=0)
+    all_rewards = torch.stack(all_rewards, dim=0)
+    all_dones = torch.stack(all_dones, dim=0)
+    ret = {
+            "action": all_actions.reshape((all_actions.shape[0] * all_actions.shape[1],) + all_actions.shape[2:]),
+            "reward": all_rewards.reshape((all_rewards.shape[0] * all_rewards.shape[1],) + all_rewards.shape[2:]),
+            "success": all_successes.reshape((all_successes.shape[0] * all_successes.shape[1],) + all_successes.shape[2:]),
+            "done": all_dones.reshape((all_dones.shape[0] * all_dones.shape[1],) + all_dones.shape[2:])
+    }
+
+    return ret
 
 def rollout(
     env: gym.vector.VectorEnv,
@@ -212,6 +318,7 @@ def eval_policy(
     start_seed: int | None = None,
     enable_progbar: bool = False,
     enable_inner_progbar: bool = False,
+    test_contexts: list | None = None
 ) -> dict:
     """
     Args:
@@ -279,14 +386,25 @@ def eval_policy(
             seeds = range(
                 start_seed + (batch_ix * env.num_envs), start_seed + ((batch_ix + 1) * env.num_envs)
             )
-        rollout_data = rollout(
-            env,
-            policy,
-            seeds=list(seeds) if seeds else None,
-            return_observations=return_episode_data,
-            render_callback=render_frame if max_episodes_rendered > 0 else None,
-            enable_progbar=enable_inner_progbar,
-        )
+        rollout_data = None
+        if test_contexts is not None:
+            rollout_data = rollout_with_contexts(
+                env,
+                policy,
+                return_observations=return_episode_data,
+                render_callback=render_frame if max_episodes_rendered > 0 else None,
+                enable_progbar=enable_inner_progbar,
+                test_contexts=test_contexts
+            )
+        else:
+            rollout_data = rollout(
+                env,
+                policy,
+                seeds=list(seeds) if seeds else None,
+                return_observations=return_episode_data,
+                render_callback=render_frame if max_episodes_rendered > 0 else None,
+                enable_progbar=enable_inner_progbar
+            )
 
         # Figure out where in each rollout sequence the first done condition was encountered (results after
         # this won't be included).
@@ -480,6 +598,10 @@ def main(
     policy.eval()
 
     with torch.no_grad(), torch.autocast(device_type=device.type) if hydra_cfg.use_amp else nullcontext():
+        test_contexts = None
+        if hydra_cfg.eval.get('test_contexts_path', None):
+            with open(hydra_cfg.eval.test_contexts_path, "rb") as file:
+                test_contexts = pickle.load(file)
         info = eval_policy(
             env,
             policy,
@@ -489,6 +611,7 @@ def main(
             start_seed=hydra_cfg.seed,
             enable_progbar=True,
             enable_inner_progbar=True,
+            test_contexts=test_contexts
         )
     print(info["aggregated"])
 

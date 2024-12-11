@@ -206,9 +206,20 @@ class TDMPC2Config(TDMPCConfig):
     vmin: float = -10.0
     vmax: float = 10.0
     num_bins: int = 101
-    dropout: float = 0.1
+    dropout: float = 0.01
     task_dim: int = 96 
-    multitask: bool = True
+    multitask: bool = False
+    num_tasks: int = 3
+    simnorm_dim: int = 8
+    log_std_min: float = -10
+    log_std_max: float = 2
+    discount_denom: float = 5
+    discount_min: float = 0.95
+    discount_max: float = 0.995
+    episode_length: int = 300
+    entropy_coef: float = 1e-4
+    enc_lr_scale: float = 0.3
+    pi_loss: str = "entropy"   # "entropy" or "mse"
 
     def __post_init__(self):
         super().__post_init__()

@@ -42,6 +42,7 @@ DATA_DIR = Path(os.environ["DATA_DIR"]) if "DATA_DIR" in os.environ else None
 
 
 class LeRobotDataset(torch.utils.data.Dataset):
+    action_key = None
     def __init__(
         self,
         repo_id: str,
@@ -51,6 +52,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         custom_transforms: Callable | None = None,
         delta_timestamps: dict[list[float]] | None = None,
         video_backend: str | None = None,
+        action_key: str | None = None,
     ):
         super().__init__()
         self.repo_id = repo_id
@@ -59,6 +61,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.image_transforms = image_transforms
         self.custom_transforms = custom_transforms
         self.delta_timestamps = delta_timestamps
+        self.action_key = action_key
         # load data from hub or locally when root is provided
         # TODO(rcadene, aliberts): implement faster transfer
         # https://huggingface.co/docs/huggingface_hub/en/guides/download#faster-downloads
@@ -163,6 +166,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
         if self.custom_transforms is not None:
             item = self.custom_transforms(item)
 
+        if self.action_key is not None:
+            item["action"] = item[self.action_key]
+
         return item
 
     def __repr__(self):
@@ -235,6 +241,7 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
         root: Path | None = DATA_DIR,
         split: str = "train",
         image_transforms: Callable | None = None,
+        custom_transforms: Callable | None = None,
         delta_timestamps: dict[list[float]] | None = None,
         video_backend: str | None = None,
     ):
@@ -252,6 +259,7 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
                         split=split,
                         delta_timestamps=delta_timestamps,
                         image_transforms=image_transforms,
+                        custom_transforms=custom_transforms,
                         video_backend=video_backend,
                     )
                 )
@@ -263,6 +271,7 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
                     split=split,
                     delta_timestamps=delta_timestamps,
                     image_transforms=image_transforms,
+                    custom_transforms=custom_transforms,
                     video_backend=video_backend,
                 )
                 for repo_id in repo_ids
@@ -399,7 +408,7 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
             raise AssertionError("We expect the loop to break out as long as the index is within bounds.")
         item = self._datasets[dataset_idx][idx - start_idx]
         item["dataset_index"] = torch.tensor(dataset_idx)
-        item["task_index"] = torch.tensor(dataset_idx)
+        #item["task_index"] = torch.tensor(dataset_idx)
         for data_key in self.disabled_data_keys:
             if data_key in item:
                 del item[data_key]

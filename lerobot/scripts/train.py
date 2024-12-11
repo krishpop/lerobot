@@ -50,6 +50,7 @@ from lerobot.common.utils.utils import (
 )
 from lerobot.scripts.eval import eval_policy
 
+from dact.utils.dataset_utils import create_custom_transforms
 
 def make_optimizer_and_scheduler(cfg, policy):
     if cfg.policy.name == "act":
@@ -86,8 +87,12 @@ def make_optimizer_and_scheduler(cfg, policy):
             num_warmup_steps=cfg.training.lr_warmup_steps,
             num_training_steps=cfg.training.offline_steps,
         )
-    elif policy.name == "tdmpc":
+    elif cfg.policy.name == "tdmpc":
         optimizer = torch.optim.Adam(policy.parameters(), cfg.training.lr)
+        lr_scheduler = None
+    elif cfg.policy.name == "tdmpc2":
+        from lerobot.common.policies.tdmpc.modeling_tdmpc2 import TDMPC2Optimizer
+        optimizer = TDMPC2Optimizer(policy, cfg)
         lr_scheduler = None
     elif cfg.policy.name == "vqbet":
         from lerobot.common.policies.vqbet.modeling_vqbet import VQBeTOptimizer, VQBeTScheduler
@@ -114,11 +119,19 @@ def update_policy(
     start_time = time.perf_counter()
     device = get_device_from_parameters(policy)
     policy.train()
+    pi_loss = 0
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
         output_dict = policy.forward(batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
         loss = output_dict["loss"]
+        if "pi_loss" in output_dict and policy.name == "tdmpc2":
+            pi_loss = output_dict["pi_loss"]
+            output_dict["pi_loss"] = pi_loss.item()
     grad_scaler.scale(loss).backward()
+    if pi_loss:
+        policy.model.track_q_grad(False)
+        grad_scaler.scale(pi_loss).backward()
+        policy.model.track_q_grad(True)
 
     # Unscale the graident of the optimzer's assigned params in-place **prior to gradient clipping**.
     grad_scaler.unscale_(optimizer)
@@ -174,7 +187,7 @@ def update_policy_with_critic(
     device = get_device_from_parameters(policy)
     policy.train()
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
-        output_dict = policy.forward(batch)
+        output_dict = policy.forward(batch, return_predicted_action=True)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
         policy_loss = output_dict["loss"]
         
@@ -230,7 +243,7 @@ def update_policy_with_critic(
     return info
 
 
-def log_train_info(logger: Logger, info, step, cfg, dataset, is_online):
+def log_train_info(logger: Logger, info, step, cfg, dataset, is_online, additional_log_items=[]):
     loss = info["loss"]
     grad_norm = info["grad_norm"]
     lr = info["lr"]
@@ -252,6 +265,7 @@ def log_train_info(logger: Logger, info, step, cfg, dataset, is_online):
         # number of time all unique samples are seen
         f"epch:{num_epochs:.2f}",
         f"loss:{loss:.3f}",
+        *additional_log_items,
         f"grdn:{grad_norm:.3f}",
         f"lr:{lr:0.1e}",
         # in seconds
@@ -370,7 +384,9 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     eval('setattr(torch.backends.cuda.matmul, "allow_tf32", True)')
 
     logging.info("make_dataset")
-    offline_dataset = make_dataset(cfg, root=cfg.dataset_root, custom_transforms=cfg.training.custom_transforms)
+    custom_transforms = None if not cfg.training.custom_transforms else create_custom_transforms(cfg.training.custom_transforms, logger.log_dir, cfg.training.get("custom_transforms_path"))
+    action_key = None if not cfg.action_key else cfg.action_key
+    offline_dataset = make_dataset(cfg, root=cfg.dataset_root, custom_transforms=custom_transforms, action_key=action_key)
     if isinstance(offline_dataset, MultiLeRobotDataset):
         logging.info(
             "Multiple datasets were provided. Applied the following index mapping to the provided datasets: "
@@ -491,7 +507,17 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
         for key in batch:
             batch[key] = batch[key].to(device, non_blocking=True)
 
-        if cfg.training.critic_distillation and policy.vqbet.action_head.vqvae_model.discretized.item():
+        distill_with_critic = cfg.training.critic_distillation and (
+            policy.name != "vqbet"
+            or cfg.distillation.discretize_with_critic
+            or policy.vqbet.action_head.vqvae_model.discretized.item()
+        )
+        if cfg.distillation.discretize_with_critic and not policy.vqbet.action_head.vqvae_model.discretized.item():
+            critic_weight = min(cfg.distillation.critic_weight * .01, 1)
+        else:
+            critic_weight = cfg.distillation.critic_weight
+
+        if distill_with_critic:
             train_info = update_policy_with_critic(
                 policy,
                 batch,
@@ -499,7 +525,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
                 cfg.training.grad_clip_norm,
                 grad_scaler=grad_scaler,
                 critics=[critic],
-                critic_weight=cfg.distillation.critic_weight,
+                critic_weight=critic_weight,
                 lr_scheduler=lr_scheduler,
                 use_amp=cfg.use_amp,
             )
@@ -515,9 +541,16 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
             )
 
         train_info["dataloading_s"] = dataloading_s
+        additional_log_items = []
+        if "pi_loss" in train_info:
+            additional_log_items.append(f"pi_loss:{train_info['pi_loss']:.4f}")
+        if "entropy" in train_info:
+            additional_log_items.append(f"entropy:{train_info['entropy']:.4f}")
+        if "Q_value_loss" in train_info:
+            additional_log_items.append(f"Q_value_loss:{train_info['Q_value_loss']:.4f}")
 
         if step % cfg.training.log_freq == 0:
-            log_train_info(logger, train_info, step, cfg, offline_dataset, is_online=False)
+            log_train_info(logger, train_info, step, cfg, offline_dataset, is_online=False, additional_log_items=additional_log_items)
 
         # Note: evaluate_and_checkpoint_if_needed happens **after** the `step`th training update has completed,
         # so we pass in step + 1.

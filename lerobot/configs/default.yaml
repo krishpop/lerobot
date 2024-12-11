@@ -33,6 +33,7 @@ seed: ???
 # datsets are provided.
 dataset_repo_id: lerobot/pusht
 dataset_root: null
+action_key: null
 video_backend: pyav
 
 distillation:
@@ -95,7 +96,8 @@ training:
   # and add an additional critic loss to the BC-policy loss.
   critic_distillation: false
 
-  custom_transforms: null
+  custom_transforms: {}
+  custom_transforms_path: null
   image_transforms:
   # These transforms are all using standard torchvision.transforms.v2
   # You can find out how these transformations affect images here:
@@ -137,6 +139,7 @@ eval:
   batch_size: 1
   # `use_async_envs` specifies whether to use asynchronous environments (multiprocessing).
   use_async_envs: false
+  test_contexts_path: null
 
 wandb:
   enable: false
