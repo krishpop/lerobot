@@ -444,7 +444,7 @@ class TDMPC2Policy(nn.Module,
             self.config.consistency_coeff * consistency_loss
             + self.config.reward_coeff * reward_loss
             + self.config.value_coeff * value_loss
-            # + self.config.pi_coeff * pi_loss
+            + self.config.pi_coeff * pi_loss
         )
 
         info.update(
