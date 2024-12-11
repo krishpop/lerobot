@@ -4,6 +4,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from copy import deepcopy
 from typing import Tensor, Optional
+from huggingface_hub import PyTorchModelHubMixin
 from lerobot.common.policies.normalize import Normalize, Unnormalize
 from lerobot.common.policies.tdmpc.utils import two_hot_inv, SimNorm
 from lerobot.common.policies.vqbet.modeling_vqbet import VQBeTModel, VQBeTConfig
@@ -38,16 +39,16 @@ class RICConfig:
 
 
 class RICModel(nn.Module):
-    """Neural network model components for IWC."""
+    """Neural network model components for RIC."""
     
-    def __init__(self, config: IWCConfig):
+    def __init__(self, config: RICConfig):
         super().__init__()
         self.config = config
         
         if self.config.multitask:
             self._task_emb = nn.Embedding(self.config.num_tasks, self.config.task_dim, max_norm=1)
             
-        self._encoder = IWCObservationEncoder(config)
+        self._encoder = RICObservationEncoder(config)
         self._dynamics = nn.Sequential(
             nn.Linear(config.latent_dim + config.output_shapes["action"][0] + config.task_dim, config.mlp_dim),
             nn.LayerNorm(config.mlp_dim),
@@ -234,18 +235,18 @@ class RICModel(nn.Module):
             for p in self._task_emb.parameters(): 
                 p.requires_grad_(mode)
 
-class IWCPolicy(nn.Module,
+class RICPolicy(nn.Module,
     PyTorchModelHubMixin,
     library_name="lerobot",
     repo_url="https://github.com/huggingface/lerobot",
-    tags=["robotics", "iwc"],
+    tags=["robotics", "ric"],
 ):
     """Robust imitation with a critic and implicit world models."""
 
-    def __init__(self, config: IWCConfig, dataset_stats: dict[str, dict[str, Tensor]] | None = None):
+    def __init__(self, config: RICConfig, dataset_stats: dict[str, dict[str, Tensor]] | None = None):
         super().__init__()
         self.config = config
-        self.model = IWCModel(config)
+        self.model = RICModel(config)
 
         if config.input_normalization_modes is not None:
             self.normalize_inputs = Normalize(
@@ -277,10 +278,10 @@ class IWCPolicy(nn.Module,
         return self.model.Qs(z, a, task_index, return_type, target)
 
 
-class IWCObservationEncoder(nn.Module):
+class RICObservationEncoder(nn.Module):
     """Encode image and/or state vector observations."""
 
-    def __init__(self, config: IWCConfig):
+    def __init__(self, config: RICConfig):
         """
         Creates encoders for pixel and/or state modalities.
         TODO(alexander-soare): The original work allows for multiple images by concatenating them along the
