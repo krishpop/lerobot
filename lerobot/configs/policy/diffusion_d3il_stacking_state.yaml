@@ -43,9 +43,9 @@ policy:
   name: diffusion
 
   # Input / output structure.
-  n_obs_steps: 5
+  n_obs_steps: 2
   horizon: 16
-  n_action_steps: 10
+  n_action_steps: 8
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
