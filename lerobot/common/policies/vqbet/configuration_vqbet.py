@@ -159,10 +159,11 @@ class VQBeTConfig:
                         "`input_shapes[{image_key}]`."
                     )
         # Check that all input images have the same shape.
-        first_image_key = next(iter(image_keys))
-        for image_key in image_keys:
-            if self.input_shapes[image_key] != self.input_shapes[first_image_key]:
-                raise ValueError(
-                    f"`input_shapes[{image_key}]` does not match `input_shapes[{first_image_key}]`, but we "
-                    "expect all image shapes to match."
-                )
+        if image_keys:
+            first_image_key = next(iter(image_keys))
+            for image_key in image_keys:
+                if self.input_shapes[image_key] != self.input_shapes[first_image_key]:
+                    raise ValueError(
+                        f"`input_shapes[{image_key}]` does not match `input_shapes[{first_image_key}]`, but we "
+                        "expect all image shapes to match."
+                    )
