@@ -82,11 +82,17 @@ class VQBeTPolicy(
         Clear observation and action queues. Should be called on `env.reset()`
         queues are populated during rollout of the policy, they contain the n latest observations and actions
         """
-        self._queues = {
-            "observation.images": deque(maxlen=self.config.n_obs_steps),
-            "observation.state": deque(maxlen=self.config.n_obs_steps),
-            "action": deque(maxlen=self.config.action_chunk_size),
-        }
+        if self.expected_image_keys:
+            self._queues = {
+                "observation.images": deque(maxlen=self.config.n_obs_steps),
+                "observation.state": deque(maxlen=self.config.n_obs_steps),
+                "action": deque(maxlen=self.config.action_chunk_size),
+            }
+        else:
+            self._queues = {
+                "observation.state": deque(maxlen=self.config.n_obs_steps),
+                "action": deque(maxlen=self.config.action_chunk_size),
+            }
 
     @torch.no_grad
     def select_action(self, batch: dict[str, Tensor]) -> Tensor:
@@ -100,7 +106,8 @@ class VQBeTPolicy(
         batch = self.normalize_inputs(batch)
         batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
         task_index = batch.get("task_index")
-        batch["observation.images"] = torch.stack([batch[k] for k in self.expected_image_keys], dim=-4)
+        if self.expected_image_keys:
+            batch["observation.images"] = torch.stack([batch[k] for k in self.expected_image_keys], dim=-4)
         # Note: It's important that this happens after stacking the images into a single key.
         self._queues = populate_queues(self._queues, batch)
 
