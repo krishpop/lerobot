@@ -436,7 +436,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
 
     # Note: this helper will be used in offline and online training loops.
-    def evaluate_and_checkpoint_if_needed(step, is_online):
+    def evaluate_and_checkpoint_if_needed(step, is_online, best_eval_success=0):
         _num_digits = max(6, len(str(cfg.training.offline_steps + cfg.training.online_steps)))
         step_identifier = f"{step:0{_num_digits}d}"
         best_performing_checkpoint = False
@@ -482,6 +482,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
                     identifier="best_checkpoint"
                 )
             logging.info("Resume training")
+        return best_eval_success
 
     # create dataloader for offline training
     if cfg.training.get("drop_n_last_frames"):
@@ -565,7 +566,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
 
         # Note: evaluate_and_checkpoint_if_needed happens **after** the `step`th training update has completed,
         # so we pass in step + 1.
-        evaluate_and_checkpoint_if_needed(step + 1, is_online=False)
+        evaluate_and_checkpoint_if_needed(step + 1, is_online=False, best_eval_success=best_eval_success)
 
         step += 1
         offline_step += 1  # noqa: SIM113
