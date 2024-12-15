@@ -106,8 +106,8 @@ class VQBeTConfig:
     # Normalization / Unnormalization
     input_normalization_modes: dict[str, str] = field(
         default_factory=lambda: {
-            "observation.image": "mean_std",
-            "observation.state": "min_max",
+            # "observation.image": "mean_std",
+            # "observation.state": "min_max",
         }
     )
     output_normalization_modes: dict[str, str] = field(default_factory=lambda: {"action": "min_max"})

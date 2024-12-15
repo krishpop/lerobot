@@ -31,7 +31,7 @@ training:
       noise_granularity: episode
       apply_to: 
         - action
-      std: 0.01
+      std: 0.002
       mean: 0
       noise_levels: 4
       input_shape: ${eval:"[${env.action_dim}]"}
