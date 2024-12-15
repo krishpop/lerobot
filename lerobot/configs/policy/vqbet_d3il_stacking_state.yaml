@@ -41,8 +41,8 @@ policy:
   name: vqbet
 
   # Input / output structure.
-  n_obs_steps: 5
-  n_action_pred_token: 3
+  n_obs_steps: 2
+  n_action_pred_token: 10
   action_chunk_size: 2
 
   input_shapes:
