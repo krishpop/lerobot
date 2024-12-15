@@ -169,7 +169,6 @@ def update_policy(
 
     return info
 
-
 def update_policy_with_critic(
     policy,
     batch,
@@ -426,6 +425,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     num_learnable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
     num_total_params = sum(p.numel() for p in policy.parameters())
 
+    best_eval_success = 0.0
     log_output_dir(out_dir)
     logging.info(f"{cfg.env.task=}")
     logging.info(f"{cfg.training.offline_steps=} ({format_big_number(cfg.training.offline_steps)})")
@@ -439,7 +439,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     def evaluate_and_checkpoint_if_needed(step, is_online):
         _num_digits = max(6, len(str(cfg.training.offline_steps + cfg.training.online_steps)))
         step_identifier = f"{step:0{_num_digits}d}"
-
+        best_performing_checkpoint = False
         if cfg.training.eval_freq > 0 and step % cfg.training.eval_freq == 0:
             logging.info(f"Eval policy at step {step}")
             with torch.no_grad(), torch.autocast(device_type=device.type) if cfg.use_amp else nullcontext():
@@ -453,6 +453,9 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
                     start_seed=cfg.seed,
                 )
             log_eval_info(logger, eval_info["aggregated"], step, cfg, offline_dataset, is_online=is_online)
+            if eval_info["aggregated"]["pc_success"] > best_eval_success:
+                best_performing_checkpoint = True
+                best_eval_success = eval_info["aggregated"]["pc_success"]
             if cfg.wandb.enable:
                 logger.log_video(eval_info["video_paths"][0], step, mode="eval")
             logging.info("Resume training")
@@ -470,6 +473,14 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
                 lr_scheduler,
                 identifier=step_identifier,
             )
+            if best_performing_checkpoint:
+                logger.save_checkpont(
+                    step,
+                    policy,
+                    optimizer,
+                    lr_scheduler,
+                    identifier="best_checkpoint"
+                )
             logging.info("Resume training")
 
     # create dataloader for offline training
