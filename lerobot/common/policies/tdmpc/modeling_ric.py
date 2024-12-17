@@ -294,17 +294,20 @@ class RICObservationEncoder(nn.Module):
         self.camera_keys = [key for key in config.input_shapes if "image" in key]
         
         # Shared trunk for all camera inputs
-        self.shared_trunk = nn.Sequential(
-            nn.Conv2d(config.input_shapes[self.camera_keys[0]][0] + config.task_dim, 
+        if len(self.camera_keys) > 0:
+            self.shared_trunk = nn.Sequential(
+                nn.Conv2d(config.input_shapes[self.camera_keys[0]][0] + config.task_dim, 
                      config.image_encoder_hidden_dim, 7, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(config.image_encoder_hidden_dim, config.image_encoder_hidden_dim, 3, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(config.image_encoder_hidden_dim, config.image_encoder_hidden_dim, 3, stride=1),
-            nn.ReLU(),
-            nn.Conv2d(config.image_encoder_hidden_dim, config.image_encoder_hidden_dim, 3, stride=1),
-            nn.ReLU(),
-        )
+                nn.ReLU(),
+                nn.Conv2d(config.image_encoder_hidden_dim, config.image_encoder_hidden_dim, 3, stride=2),
+                nn.ReLU(),
+                nn.Conv2d(config.image_encoder_hidden_dim, config.image_encoder_hidden_dim, 3, stride=1),
+                nn.ReLU(),
+                nn.Conv2d(config.image_encoder_hidden_dim, config.image_encoder_hidden_dim, 3, stride=1),
+                nn.ReLU(),
+            )
+        else:
+            self.shared_trunk = nn.Identity()
 
         # Calculate output shape using dummy input
         dummy_batch = torch.zeros(1, *config.input_shapes[self.camera_keys[0]])
