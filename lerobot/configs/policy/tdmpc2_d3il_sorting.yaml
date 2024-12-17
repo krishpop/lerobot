@@ -1,20 +1,10 @@
 # @package _global_
 
 seed: 1
-dataset_repo_id: krishpop/d3il_sorting_2boxes
-
-override_dataset_stats:
-  observation.images.bp_cam:
-    # stats from imagenet, since we use a pretrained vision model
-    mean: [[[0.485]], [[0.456]], [[0.406]]]  # (c,1,1)
-    std: [[[0.229]], [[0.224]], [[0.225]]]  # (c,1,1)
-  # observation.images.inhand_cam:
-  #   # stats from imagenet, since we use a pretrained vision model
-  #   mean: [[[0.485]], [[0.456]], [[0.406]]]  # (c,1,1)
-  #   std: [[[0.229]], [[0.224]], [[0.225]]]  # (c,1,1)
+dataset_repo_id: krishpop/d3il_stacking
 
 training:
-  offline_steps: 250000
+  offline_steps: 500000
   save_freq: 10000
   # TODO(alexander-soare): uncomment when online training gets reinstated
   online_steps: 250000
@@ -33,21 +23,9 @@ training:
   grad_clip_norm: 10.0
   lr: 3e-4
 
-  custom_transforms:
-    action_noise:
-      noise_type: gaussian
-      noise_granularity: episode
-      apply_to: 
-        - action
-      std: 0.01
-      mean: 0
-      noise_levels: 4
-      input_shape: ${eval:"[${env.action_dim}]"}  # add chunk_size if using item granularity
-
   delta_timestamps:
-    observation.images.bp_cam: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
-    # observation.images.inhand_cam: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
-    observation.environment_state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
+    # observation.images.bp_cam: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
+    # observation.environment_state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
     observation.state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
     action: "[i / ${fps} for i in range(${policy.horizon})]"
     next.reward: "[i / ${fps} for i in range(${policy.horizon})]"
@@ -66,18 +44,16 @@ policy:
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
-    observation.images.bp_cam: [3, 96, 96]
-    # observation.images.inhand_cam: [3, 96, 96]
-    observation.environment_state: [15]
+    # observation.images.bp_cam: [3, 96, 96]
+    # observation.environment_state: [15]
     observation.state: ["${env.state_dim}"]
   output_shapes:
     action: ["${env.action_dim}"]
 
   # Normalization / Unnormalization
   input_normalization_modes:
-    observation.images.bp_cam: mean_std
-    # observation.images.inhand_cam: mean_std
-    observation.environment_state: min_max
+    # observation.images.bp_cam: mean_std
+    # observation.environment_state: min_max
     # Use min_max normalization just because it's more standard.
     observation.state: min_max
   output_normalization_modes:
