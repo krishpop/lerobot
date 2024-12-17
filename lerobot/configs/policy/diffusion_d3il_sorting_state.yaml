@@ -8,7 +8,7 @@ seed: 100000
 dataset_repo_id: krishpop/d3il_sorting_2boxes
 
 training:
-  offline_steps: 2000000
+  offline_steps: 500000
   online_steps: 0
   eval_freq: 25000
   save_freq: 25000
