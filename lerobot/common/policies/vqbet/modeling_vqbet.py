@@ -93,6 +93,8 @@ class VQBeTPolicy(
                 "observation.state": deque(maxlen=self.config.n_obs_steps),
                 "action": deque(maxlen=self.config.action_chunk_size),
             }
+            if "observation.environment_state" in self.config.input_shapes:
+                self._queues["observation.environment_state"] = deque(maxlen=self.config.n_obs_steps)
 
     @torch.no_grad
     def select_action(self, batch: dict[str, Tensor]) -> Tensor:
@@ -304,8 +306,11 @@ class VQBeTModel(nn.Module):
         self.action_token = nn.Parameter(torch.randn(1, 1, self.config.gpt_input_dim))
 
         # To input state and observation features into GPT layers, we first project the features to fit the shape of input size of GPT.
+        input_shape = config.input_shapes["observation.state"][0]
+        if "observation.environment_state" in self.config.input_shapes:
+            input_shape += config.input_shapes["observation.environment_state"][0]
         self.state_projector = MLP(
-            config.input_shapes["observation.state"][0], hidden_channels=[self.config.gpt_input_dim]
+            input_shape, hidden_channels=[self.config.gpt_input_dim]
         )
 
         # GPT part of VQ-BeT
@@ -342,7 +347,10 @@ class VQBeTModel(nn.Module):
                 img_features
             )  # (batch, obs_step, number of different cameras, projection dims)
             input_tokens = [rgb_tokens[:, :, i] for i in range(rgb_tokens.size(2))]
-        input_tokens.append(self.state_projector(batch["observation.state"]))  # (batch, obs_step, projection dims)
+        state_input = batch["observation.state"]
+        if "observation.environment_state" in batch:
+            state_input = torch.cat((batch["observation.state"], batch["observation.environment_state"]), dim=-1)
+        input_tokens.append(self.state_projector(state_input))  # (batch, obs_step, projection dims)
         input_tokens.append(einops.repeat(self.action_token, "1 1 d -> b n d", b=batch_size, n=n_obs_steps))
         # batch should have "task_index" for multitask training and evaluation
         if "task_index" in batch:
