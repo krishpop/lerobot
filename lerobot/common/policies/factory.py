@@ -71,6 +71,9 @@ def get_policy_and_config_classes(name: str) -> tuple[Policy, object]:
         from lerobot.common.policies.vqbet.modeling_vqbet import VQBeTPolicy
 
         return VQBeTPolicy, VQBeTConfig
+    elif name == "ric":
+        from lerobot.common.policies.tdmpc.modeling_ric import RICModel, RICConfig
+        return RICModel, RICConfig
     else:
         raise NotImplementedError(f"Policy with name {name} is not implemented.")
 
@@ -99,36 +102,38 @@ def make_critic(hydra_cfg: DictConfig, policy: Policy):
 def make_policy(
     hydra_cfg: DictConfig, pretrained_policy_name_or_path: str | None = None, dataset_stats=None
 ) -> Policy:
-    """Make an instance of a policy class.
-
-    Args:
-        hydra_cfg: A parsed Hydra configuration (see scripts). If `pretrained_policy_name_or_path` is
-            provided, only `hydra_cfg.policy.name` is used while everything else is ignored.
-        pretrained_policy_name_or_path: Either the repo ID of a model hosted on the Hub or a path to a
-            directory containing weights saved using `Policy.save_pretrained`. Note that providing this
-            argument overrides everything in `hydra_cfg.policy` apart from `hydra_cfg.policy.name`.
-        dataset_stats: Dataset statistics to use for (un)normalization of inputs/outputs in the policy. Must
-            be provided when initializing a new policy, and must not be provided when loading a pretrained
-            policy. Therefore, this argument is mutually exclusive with `pretrained_policy_name_or_path`.
-    """
-    if not (pretrained_policy_name_or_path is None) ^ (dataset_stats is None):
-        raise ValueError(
-            "Exactly one of `pretrained_policy_name_or_path` and `dataset_stats` must be provided."
-        )
-
+    """Make an instance of a policy class."""
     policy_cls, policy_cfg_class = get_policy_and_config_classes(hydra_cfg.policy.name)
 
-    policy_cfg = _policy_cfg_from_hydra_cfg(policy_cfg_class, hydra_cfg)
+    # Handle nested configs for RIC
+    if hydra_cfg.policy.name == "ric":
+        # Get VQBeT config if specified
+        vqbet_config = None
+        if "vqbet_config" in hydra_cfg:
+            _, vqbet_cfg_class = get_policy_and_config_classes("vqbet")
+            vqbet_config = _policy_cfg_from_hydra_cfg(vqbet_cfg_class, hydra_cfg.vqbet_config)
+            
+        # Get Diffusion config if specified  
+        diffusion_config = None
+        if "diffusion_config" in hydra_cfg:
+            _, diffusion_cfg_class = get_policy_and_config_classes("diffusion")
+            diffusion_config = _policy_cfg_from_hydra_cfg(diffusion_cfg_class, hydra_cfg.diffusion_config)
+
+        # Create RIC config with nested configs
+        policy_cfg = policy_cfg_class(
+            vqbet_config=vqbet_config,
+            diffusion_config=diffusion_config,
+            **{k: v for k, v in OmegaConf.to_container(hydra_cfg.policy).items() 
+               if k not in ["vqbet_config", "diffusion_config"]}
+        )
+    else:
+        policy_cfg = _policy_cfg_from_hydra_cfg(policy_cfg_class, hydra_cfg)
+
     if pretrained_policy_name_or_path is None:
-        # Make a fresh policy.
+        # Make a fresh policy
         policy = policy_cls(policy_cfg, dataset_stats)
     else:
-        # Load a pretrained policy and override the config if needed (for example, if there are inference-time
-        # hyperparameters that we want to vary).
-        # TODO(alexander-soare): This hack makes use of huggingface_hub's tooling to load the policy with,
-        # pretrained weights which are then loaded into a fresh policy with the desired config. This PR in
-        # huggingface_hub should make it possible to avoid the hack:
-        # https://github.com/huggingface/huggingface_hub/pull/2274.
+        # Load pretrained policy
         policy = policy_cls(policy_cfg)
         policy.load_state_dict(policy_cls.from_pretrained(pretrained_policy_name_or_path).state_dict())
 

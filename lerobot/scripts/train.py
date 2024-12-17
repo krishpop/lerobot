@@ -53,7 +53,23 @@ from lerobot.scripts.eval import eval_policy
 from dact.utils.dataset_utils import create_custom_transforms
 
 def make_optimizer_and_scheduler(cfg, policy):
-    if cfg.policy.name == "act":
+    if cfg.policy.name == "ric":
+        optimizer = torch.optim.Adam(
+            policy.parameters(),
+            cfg.training.lr,
+            cfg.training.adam_betas,
+            cfg.training.adam_eps,
+            cfg.training.adam_weight_decay,
+        )
+        from diffusers.optimization import get_scheduler
+        lr_scheduler = get_scheduler(
+            cfg.training.lr_scheduler,
+            optimizer=optimizer,
+            num_warmup_steps=cfg.training.lr_warmup_steps,
+            num_training_steps=cfg.training.offline_steps,
+        )
+        return optimizer, lr_scheduler
+    elif cfg.policy.name == "act":
         optimizer_params_dicts = [
             {
                 "params": [
