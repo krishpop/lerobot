@@ -166,8 +166,8 @@ class Logger:
             artifact = self._wandb.Artifact(wandb_artifact_name, type="model")
             artifact.add_file(save_dir / SAFETENSORS_SINGLE_FILE)
             self._wandb.log_artifact(artifact)
-        if self.last_checkpoint_dir.exists():
-            os.remove(self.last_checkpoint_dir)
+        # if self.last_checkpoint_dir.exists():
+        #     os.remove(self.last_checkpoint_dir)
 
     def save_training_state(
         self,
@@ -208,7 +208,7 @@ class Logger:
             checkpoint_dir / self.pretrained_model_dir_name, policy, wandb_artifact_name=wandb_artifact_name
         )
         self.save_training_state(checkpoint_dir, train_step, optimizer, scheduler)
-        os.symlink(checkpoint_dir.absolute(), self.last_checkpoint_dir)
+        # os.symlink(checkpoint_dir.absolute(), self.last_checkpoint_dir)
 
     def load_last_training_state(self, optimizer: Optimizer, scheduler: LRScheduler | None) -> int:
         """

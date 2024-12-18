@@ -497,6 +497,13 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
                     lr_scheduler,
                     identifier="best_checkpoint"
                 )
+            logger.save_checkpont(
+                step,
+                policy,
+                optimizer,
+                lr_scheduler,
+                identifier="last"
+            )
             logging.info("Resume training")
         return best_eval_success
 
@@ -582,7 +589,7 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
 
         # Note: evaluate_and_checkpoint_if_needed happens **after** the `step`th training update has completed,
         # so we pass in step + 1.
-        evaluate_and_checkpoint_if_needed(step + 1, is_online=False, best_eval_success=best_eval_success)
+        best_eval_success = evaluate_and_checkpoint_if_needed(step + 1, is_online=False, best_eval_success=best_eval_success)
 
         step += 1
         offline_step += 1  # noqa: SIM113
