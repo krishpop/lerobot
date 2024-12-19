@@ -95,6 +95,7 @@ class TDMPC2Policy(nn.Module,
             self._use_image = True
         else:
             self._use_image = False
+        self._use_env_state = False
         if "observation.environment_state" in config.input_shapes:
             self._use_env_state = True
         if "observation.state" in config.input_shapes:
@@ -439,12 +440,11 @@ class TDMPC2Policy(nn.Module,
         # as well as expected.
 
         pi_loss = self.config.pi_coeff * (pi_loss * rho * mask).mean()
-
         loss = (
             self.config.consistency_coeff * consistency_loss
             + self.config.reward_coeff * reward_loss
             + self.config.value_coeff * value_loss
-            + self.config.pi_coeff * pi_loss
+            #+ self.config.pi_coeff * pi_loss
         )
 
         info.update(
