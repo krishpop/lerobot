@@ -1,12 +1,10 @@
 # @package _global_
-
 seed: 1
 dataset_repo_id: krishpop/d3il_sorting_2boxes
 
 training:
   offline_steps: 500000
   save_freq: 10000
-  # TODO(alexander-soare): uncomment when online training gets reinstated
   online_steps: 0
   eval_freq: 10000
   online_steps_between_rollouts: 1000
@@ -24,8 +22,6 @@ training:
   lr: 3e-4
 
   delta_timestamps:
-    # observation.images.bp_cam: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
-    # observation.environment_state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
     observation.state: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
     action: "[i / ${fps} for i in range(${policy.horizon})]"
     next.reward: "[i / ${fps} for i in range(${policy.horizon})]"
@@ -39,13 +35,11 @@ policy:
 
   # Input / output structure.
   n_action_repeats: 1
-  horizon: 10
-  n_action_steps: 10
+  horizon: 16  # Increased for better long-term planning
+  n_action_steps: 16  # Matching horizon for fine-grained control
 
   input_shapes:
-    # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
-    # observation.images.bp_cam: [3, 96, 96]
-    # observation.environment_state: [15]
+    # observation.images.bp_cam: [3, 96, 96]  # Including image-based observations
     observation.state: ["${env.state_dim}"]
   output_shapes:
     action: ["${env.action_dim}"]
@@ -53,15 +47,12 @@ policy:
   # Normalization / Unnormalization
   input_normalization_modes:
     # observation.images.bp_cam: mean_std
-    # observation.environment_state: min_max
-    # Use min_max normalization just because it's more standard.
     observation.state: min_max
   output_normalization_modes:
     action: min_max
 
   # Architecture / modeling.
-  # Neural networks.
-  image_encoder_hidden_dim: 32
+  image_encoder_hidden_dim: 64  # Increased for better image feature extraction
   state_encoder_hidden_dim: 256
   latent_dim: 512
   task_dim: 96
@@ -72,7 +63,7 @@ policy:
   enc_lr_scale: 0.3
 
   # Reinforcement learning.
-  discount: 0.9
+  discount: 0.95  # Adjusted for better long-term reward prioritization
   discount_denom: 5
   discount_min: 0.95
   discount_max: 0.995
@@ -81,8 +72,8 @@ policy:
   use_mpc: true
   cem_iterations: 6
   max_std: 2.0
-  min_std: 0.05
-  n_gaussian_samples: 512
+  min_std: 0.01  # Reduced for finer action precision
+  n_gaussian_samples: 1024  # Increased for improved action optimization
   n_pi_samples: 51
   uncertainty_regularizer_coeff: 1.0
   n_elites: 64
@@ -97,15 +88,15 @@ policy:
   vmax: +1
 
   # Training and loss computation.
-  max_random_shift_ratio: 0.0476
+  max_random_shift_ratio: 0.1  # Adding data augmentation
 
   # Loss coefficients.
   entropy_coef: 1e-4
   pi_loss: "entropy"
-  reward_coeff: 0.5
+  reward_coeff: 1.0  # Emphasizing task completion
   expectile_weight: 0.9
   value_coeff: 0.1
-  consistency_coeff: 20.0
+  consistency_coeff: 30.0  # Increased for better action stability
   pi_coeff: 0.5
   temporal_decay_coeff: 0.5
 

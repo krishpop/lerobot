@@ -19,9 +19,9 @@ training:
   do_online_rollout_async: false
   log_freq: 100
 
-  batch_size: 256
+  batch_size: 512
   grad_clip_norm: 10.0
-  lr: 3e-4
+  lr: 3e-3
 
   delta_timestamps:
     # observation.images.bp_cam: "[i / ${fps} for i in range(${policy.horizon} + 1)]"
@@ -65,7 +65,7 @@ policy:
   state_encoder_hidden_dim: 256
   latent_dim: 512
   task_dim: 96
-  dropout: 0.01
+  dropout: 0.001
   q_ensemble_size: 5
   mlp_dim: 512
   simnorm_dim: 8

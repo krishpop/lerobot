@@ -439,12 +439,12 @@ class TDMPC2Policy(nn.Module,
         # TODO(alexander-soare): Take the sum over the temporal dimension and check that training still works
         # as well as expected.
 
-        pi_loss = self.config.pi_coeff * (pi_loss * rho * mask).mean()
+        pi_loss = (pi_loss * rho * mask).mean()
         loss = (
             self.config.consistency_coeff * consistency_loss
             + self.config.reward_coeff * reward_loss
             + self.config.value_coeff * value_loss
-            #+ self.config.pi_coeff * pi_loss
+            + self.config.pi_coeff * pi_loss
         )
 
         info.update(
@@ -452,8 +452,7 @@ class TDMPC2Policy(nn.Module,
                 "consistency_loss": consistency_loss.item(),
                 "reward_loss": reward_loss.item(),
                 "Q_value_loss": value_loss.item(),
-                "pi_loss": pi_loss,
-                # "pi_loss": pi_loss.item(),
+                "pi_loss": pi_loss.item(),
                 "loss": loss,
                 "sum_loss": loss.item() * self.config.horizon,
             }

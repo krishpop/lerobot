@@ -39,8 +39,8 @@ policy:
 
   # Input / output structure.
   n_action_repeats: 1
-  horizon: 10
-  n_action_steps: 10
+  horizon: 3
+  n_action_steps: 3
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
@@ -65,11 +65,11 @@ policy:
   state_encoder_hidden_dim: 256
   latent_dim: 512
   task_dim: 96
-  dropout: 0.01
+  dropout: 0.001
   q_ensemble_size: 5
   mlp_dim: 512
   simnorm_dim: 8
-  enc_lr_scale: 0.3
+  enc_lr_scale: 1.0
 
   # Reinforcement learning.
   discount: 0.9

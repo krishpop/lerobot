@@ -345,7 +345,7 @@ class TDMPCPolicy(
             current_observation[k] = observations[k][0]
             next_observations[k] = observations[k][1:]
         horizon, batch_size = next_observations[
-            "observation.image" if self._use_image else "observation.environment_state"
+            "observation.image" if self._use_image else "observation.state"
         ].shape[:2]
 
         # Run latent rollout using the latent dynamics model and policy model.

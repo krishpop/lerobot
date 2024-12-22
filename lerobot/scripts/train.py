@@ -135,19 +135,19 @@ def update_policy(
     start_time = time.perf_counter()
     device = get_device_from_parameters(policy)
     policy.train()
-    pi_loss = 0
+    # pi_loss = 0
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
         output_dict = policy.forward(batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
         loss = output_dict["loss"]
-        if "pi_loss" in output_dict and policy.name == "tdmpc2":
-            pi_loss = output_dict["pi_loss"]
-            output_dict["pi_loss"] = pi_loss.item()
+        # if "pi_loss" in output_dict and policy.name == "tdmpc2":
+        #     pi_loss = output_dict["pi_loss"]
+        #     output_dict["pi_loss"] = pi_loss.item()
     grad_scaler.scale(loss).backward()
-    if pi_loss:
-        policy.model.track_q_grad(False)
-        grad_scaler.scale(pi_loss).backward()
-        policy.model.track_q_grad(True)
+    # if pi_loss:
+    #     policy.model.track_q_grad(False)
+    #     grad_scaler.scale(pi_loss).backward()
+    #     policy.model.track_q_grad(True)
 
     # Unscale the graident of the optimzer's assigned params in-place **prior to gradient clipping**.
     grad_scaler.unscale_(optimizer)

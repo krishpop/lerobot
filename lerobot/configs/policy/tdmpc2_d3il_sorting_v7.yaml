@@ -19,8 +19,8 @@ training:
   do_online_rollout_async: false
   log_freq: 100
 
-  batch_size: 256
-  grad_clip_norm: 10.0
+  batch_size: 64
+  grad_clip_norm: 15.0
   lr: 3e-4
 
   delta_timestamps:
@@ -39,8 +39,8 @@ policy:
 
   # Input / output structure.
   n_action_repeats: 1
-  horizon: 10
-  n_action_steps: 10
+  horizon: 8
+  n_action_steps: 2
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
@@ -74,16 +74,16 @@ policy:
   # Reinforcement learning.
   discount: 0.9
   discount_denom: 5
-  discount_min: 0.95
-  discount_max: 0.995
+  discount_min: 0.96
+  discount_max: 0.997
 
   # Inference.
   use_mpc: true
   cem_iterations: 6
-  max_std: 2.0
-  min_std: 0.05
-  n_gaussian_samples: 512
-  n_pi_samples: 51
+  max_std: 1.5
+  min_std: 0.02
+  n_gaussian_samples: 1024
+  n_pi_samples: 64
   uncertainty_regularizer_coeff: 1.0
   n_elites: 64
   elite_weighting_temperature: 0.5
@@ -102,7 +102,7 @@ policy:
   # Loss coefficients.
   entropy_coef: 1e-4
   pi_loss: "entropy"
-  reward_coeff: 0.5
+  reward_coeff: 0.7
   expectile_weight: 0.9
   value_coeff: 0.1
   consistency_coeff: 20.0
@@ -110,4 +110,4 @@ policy:
   temporal_decay_coeff: 0.5
 
   # Target model.
-  target_model_momentum: 0.995
+  target_model_momentum: 0.998

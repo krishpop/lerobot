@@ -7,7 +7,7 @@ training:
   offline_steps: 500000
   save_freq: 10000
   # TODO(alexander-soare): uncomment when online training gets reinstated
-  online_steps: 250000
+  online_steps: 0
   eval_freq: 10000
   online_steps_between_rollouts: 1000
   online_sampling_ratio: 0.5
@@ -39,8 +39,8 @@ policy:
 
   # Input / output structure.
   n_action_repeats: 1
-  horizon: 8
-  n_action_steps: 8
+  horizon: 10
+  n_action_steps: 10
 
   input_shapes:
     # TODO(rcadene, alexander-soare): add variables for height and width from the dataset/env?
@@ -93,8 +93,8 @@ policy:
 
   # critic
   num_bins: 101
-  vmin: -10
-  vmax: +10
+  vmin: 0
+  vmax: +1
 
   # Training and loss computation.
   max_random_shift_ratio: 0.0476
