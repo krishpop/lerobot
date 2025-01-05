@@ -163,7 +163,7 @@ class DiffusionPolicy(
         actions = self.diffusion.generate_actions(batch).transpose(0,1)
         return actions[0]
 
-    def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
+    def forward(self, batch: dict[str, Tensor], return_predicted_action=False) -> dict[str, Tensor]:
         """Run the batch through the model and compute the loss for training or validation."""
         batch = self.normalize_inputs(batch)
         if len(self.expected_image_keys) > 0:
@@ -171,6 +171,9 @@ class DiffusionPolicy(
             batch["observation.images"] = torch.stack([batch[k] for k in self.expected_image_keys], dim=-4)
         batch = self.normalize_targets(batch)
         loss = self.diffusion.compute_loss(batch)
+        if return_predicted_action:
+            predicted_actions = self.diffusion.generate_actions(batch, step_range=[0, self.config.n_obs_steps])
+            return {"loss": loss, "action_head_output": {"predicted_action_chunk": predicted_actions}}
         return {"loss": loss}
 
 
@@ -274,7 +277,7 @@ class DiffusionModel(nn.Module):
         # Concatenate features then flatten to (B, global_cond_dim).
         return torch.cat(global_cond_feats, dim=-1).flatten(start_dim=1)
 
-    def generate_actions(self, batch: dict[str, Tensor]) -> Tensor:
+    def generate_actions(self, batch: dict[str, Tensor], step_range=None) -> Tensor:
         """
         This function expects `batch` to have:
         {
@@ -297,6 +300,9 @@ class DiffusionModel(nn.Module):
         # Extract `n_action_steps` steps worth of actions (from the current observation).
         start = n_obs_steps - 1
         end = start + self.config.n_action_steps
+        if step_range:
+            start = step_range[0]
+            end = step_range[1]
         actions = actions[:, start:end]
 
         return actions

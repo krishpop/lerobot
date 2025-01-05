@@ -203,7 +203,7 @@ def update_policy_with_critic(
     device = get_device_from_parameters(policy)
     policy.train()
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
-        output_dict = policy.forward(batch)
+        output_dict = policy.forward(batch, return_predicted_action=True)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
         policy_loss = output_dict["loss"]
 
@@ -213,15 +213,14 @@ def update_policy_with_critic(
         for critic in critics:
             critic.eval()  # Ensure critic is in evaluation mode
             if isinstance(critic, TDMPC2):
-                with torch.set_grad_enabled(True):
-                    normalized_batch = policy.normalize_inputs(batch)
-                    if critic.cfg.task == "d3il-stacking":
-                        obs = torch.cat((normalized_batch["observation.state"], normalized_batch["observation.environment_state"]), dim=-1)
-                    else:
-                        obs = normalized_batch["observation.state"]
-                    z = critic.model.encode(obs, None)
-                    estimated_value = critic.model.Q(z, predicted_action, None, return_type='avg')
-                    critic_loss -= estimated_value
+                normalized_batch = policy.normalize_inputs(batch)
+                if critic.cfg.task == "d3il-stacking":
+                    obs = torch.cat((normalized_batch["observation.state"], normalized_batch["observation.environment_state"]), dim=-1)
+                else:
+                    obs = normalized_batch["observation.state"]
+                z = critic.model.encode(obs, None)
+                estimated_value = critic.model.Q(z, predicted_action, None, return_type='all')
+                critic_loss -= estimated_value.mean()
             else:
                 critic_output = critic(batch, predicted_action)
                 critic_loss += critic_output["loss"]
