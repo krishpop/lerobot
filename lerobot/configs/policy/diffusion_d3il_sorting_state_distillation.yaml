@@ -36,7 +36,7 @@ training:
   drop_n_last_frames: 0  # ${policy.horizon} - ${policy.n_action_steps} - ${policy.n_obs_steps} + 1
 
 distillation:
-  critic_weight: 1.0
+  critic_weight: 0.01
 
 eval:
   n_episodes: 50

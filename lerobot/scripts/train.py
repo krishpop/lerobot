@@ -211,19 +211,18 @@ def update_policy_with_critic(
         critic_loss = 0
         predicted_action = output_dict["action_head_output"]["predicted_action_chunk"]
         for critic in critics:
-            critic.eval()  # Ensure critic is in evaluation mode
-            if isinstance(critic, TDMPC2):
-                normalized_batch = policy.normalize_inputs(batch)
-                if critic.cfg.task == "d3il-stacking":
-                    obs = torch.cat((normalized_batch["observation.state"], normalized_batch["observation.environment_state"]), dim=-1)
-                else:
-                    obs = normalized_batch["observation.state"]
-                z = critic.model.encode(obs, None)
-                estimated_value = critic.model.Q(z, predicted_action, None, return_type='all')
-                critic_loss -= estimated_value.mean()
+            # if isinstance(critic, TDMPC2):
+            normalized_batch = policy.normalize_inputs(batch)
+            if critic.cfg.task == "d3il-stacking":
+                obs = torch.cat((normalized_batch["observation.state"], normalized_batch["observation.environment_state"]), dim=-1)
             else:
-                critic_output = critic(batch, predicted_action)
-                critic_loss += critic_output["loss"]
+                obs = normalized_batch["observation.state"]
+            z = critic.model.encode(obs, None)
+            estimated_value = critic.model.Q(z, predicted_action, None, return_type='avg')
+            critic_loss -= estimated_value.mean()
+            # else:
+            #     critic_output = critic(batch, predicted_action)
+            #     critic_loss += critic_output["loss"]
         critic_loss /= len(critics)  # Average critic loss
         # Combine policy loss and critic loss
         loss = policy_loss + critic_weight * critic_loss
@@ -541,6 +540,8 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
     dl_iter = cycle(dataloader)
 
     policy.train()
+    if critic:
+        critic.eval()
     offline_step = 0
     for _ in range(step, cfg.training.offline_steps):
         if offline_step == 0:

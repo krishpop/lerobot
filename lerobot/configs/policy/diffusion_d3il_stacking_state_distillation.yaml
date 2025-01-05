@@ -41,7 +41,7 @@ eval:
   batch_size: 50
 
 distillation:
-  critic_weight: 1.0
+  critic_weight: 0.01
 
 policy:
   name: diffusion
