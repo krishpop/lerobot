@@ -51,6 +51,7 @@ from lerobot.common.utils.utils import (
 from lerobot.scripts.eval import eval_policy
 
 from dact.utils.dataset_utils import create_custom_transforms
+from tdmpc2 import TDMPC2
 
 def make_optimizer_and_scheduler(cfg, policy):
     if cfg.policy.name == "ric":
@@ -202,17 +203,28 @@ def update_policy_with_critic(
     device = get_device_from_parameters(policy)
     policy.train()
     with torch.autocast(device_type=device.type) if use_amp else nullcontext():
-        output_dict = policy.forward(batch, return_predicted_action=True)
+        output_dict = policy.forward(batch)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
         policy_loss = output_dict["loss"]
-        
+
         # Compute critic loss
         critic_loss = 0
         predicted_action = output_dict["action_head_output"]["predicted_action_chunk"]
         for critic in critics:
             critic.eval()  # Ensure critic is in evaluation mode
-            critic_output = critic(batch, predicted_action)
-            critic_loss += critic_output["loss"]
+            if isinstance(critic, TDMPC2):
+                with torch.set_grad_enabled(True):
+                    normalized_batch = policy.normalize_inputs(batch)
+                    if critic.cfg.task == "d3il-stacking":
+                        obs = torch.cat((normalized_batch["observation.state"], normalized_batch["observation.environment_state"]), dim=-1)
+                    else:
+                        obs = normalized_batch["observation.state"]
+                    z = critic.model.encode(obs, None)
+                    estimated_value = critic.model.Q(z, predicted_action, None, return_type='avg')
+                    critic_loss -= estimated_value
+            else:
+                critic_output = critic(batch, predicted_action)
+                critic_loss += critic_output["loss"]
         critic_loss /= len(critics)  # Average critic loss
         # Combine policy loss and critic loss
         loss = policy_loss + critic_weight * critic_loss

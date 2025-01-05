@@ -15,12 +15,12 @@
 # limitations under the License.
 import inspect
 import logging
+import os
 
 from omegaconf import DictConfig, OmegaConf
 
 from lerobot.common.policies.policy_protocol import Policy
 from lerobot.common.utils.utils import get_safe_torch_device
-
 
 def _policy_cfg_from_hydra_cfg(policy_cfg_class, hydra_cfg):
     expected_kwargs = set(inspect.signature(policy_cfg_class).parameters)
@@ -87,16 +87,44 @@ def make_critic(hydra_cfg: DictConfig, policy: Policy):
 
     pretrained_critic_path = hydra_cfg.critic_pretrained_policy_path
     assert Path(pretrained_critic_path).exists(), f"Pretrained critic path {pretrained_critic_path} does not exist"
-    last_pretrained_model_dir = Logger.get_last_pretrained_model_dir(pretrained_critic_path)
-    assert last_pretrained_model_dir.exists(), f"Last pretrained model dir {last_pretrained_model_dir} does not exist"
 
-    if last_pretrained_model_dir is not None and last_pretrained_model_dir.exists():
-        critic_cfg = init_hydra_config(str(last_pretrained_model_dir / "config.yaml"))
+    if ".pt" in pretrained_critic_path:
+        from tdmpc2 import TDMPC2
+        from common.parser import parse_cfg
+        from envs import make_env
+        # trained with tdmpc2 repo
+        tdmpc2_config_path = "/juno/u/bsud2/multi_task_experts/tdmpc2/tdmpc2/config.yaml"
+        work_dir = "/".join(pretrained_critic_path.split("/")[:-1])
+        task = "d3il-stacking" if "stacking" in pretrained_critic_path else "d3il-sorting"
+        print("task ", task)
+        print("work dir ", work_dir)
+        print("pretrained critic path ", pretrained_critic_path)
+        overrides = [
+            f"task={task}",
+            "model_size=48",
+            f"work_dir={work_dir}",
+            "horizon=6",
+            "mpc=false",
+            f"checkpoint={pretrained_critic_path}"
+        ]
+        tdmpc2_cfg = init_hydra_config(tdmpc2_config_path, overrides)
+        tdmpc2_cfg = parse_cfg(tdmpc2_cfg)
+        make_env(tdmpc2_cfg)
+        agent = TDMPC2(tdmpc2_cfg)
+        assert os.path.exists(tdmpc2_cfg.checkpoint), f'Checkpoint {tdmpc2_cfg.checkpoint} not found! Must be a valid filepath.'
+        agent.load(tdmpc2_cfg.checkpoint)
+        return agent
+    else:
+        last_pretrained_model_dir = Logger.get_last_pretrained_model_dir(pretrained_critic_path)
+        assert last_pretrained_model_dir.exists(), f"Last pretrained model dir {last_pretrained_model_dir} does not exist"
 
-    critic_policy = make_policy(critic_cfg, last_pretrained_model_dir, dataset_stats=None)
-    critic = TDMPCCritic(critic_policy, use_advantage=hydra_cfg.distillation.critic_use_advantage)
-    critic.set_normalize_stats(policy)
-    return critic
+        if last_pretrained_model_dir is not None and last_pretrained_model_dir.exists():
+            critic_cfg = init_hydra_config(str(last_pretrained_model_dir / "config.yaml"))
+
+        critic_policy = make_policy(critic_cfg, last_pretrained_model_dir, dataset_stats=None)
+        critic = TDMPCCritic(critic_policy, use_advantage=hydra_cfg.distillation.critic_use_advantage)
+        critic.set_normalize_stats(policy)
+        return critic
 
 
 def make_policy(
