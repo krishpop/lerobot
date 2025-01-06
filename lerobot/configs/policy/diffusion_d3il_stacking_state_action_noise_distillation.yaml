@@ -6,7 +6,7 @@
 
 seed: 100000
 dataset_repo_id: krishpop/d3il_stacking
-critic_pretrained_policy_path: /juno/u/bsud2/tdmpc2_d3il_stacking_action_noise17/models/500000.pt
+critic_pretrained_policy_path: /juno/u/bsud2/tdmpc2_outputs/tdmpc2_d3il_stacking_action_noise17/models/500000.pt
 
 
 training:
