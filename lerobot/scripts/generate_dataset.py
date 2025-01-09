@@ -284,14 +284,20 @@ def eval_policy(
             seeds = range(
                 start_seed + (batch_ix * env.num_envs), start_seed + ((batch_ix + 1) * env.num_envs)
             )
-        rollout_data = rollout(
-            env,
-            policy,
-            seeds=list(seeds) if seeds else None,
-            return_observations=return_episode_data,
-            render_callback=render_frame if max_episodes_rendered > 0 else None,
-            enable_progbar=enable_inner_progbar,
-        )
+        successfully_rolled_out = False
+        while not successfully_rolled_out:
+            try:
+                rollout_data = rollout(
+                    env,
+                    policy,
+                    seeds=list(seeds) if seeds else None,
+                    return_observations=return_episode_data,
+                    render_callback=render_frame if max_episodes_rendered > 0 else None,
+                    enable_progbar=enable_inner_progbar,
+                )
+                successfully_rolled_out = True
+            except Exception as e:
+                print("Exception rolling out policy", str(e))
 
         # Figure out where in each rollout sequence the first done condition was encountered (results after
         # this won't be included).
@@ -597,7 +603,7 @@ def main(
 
     stats = compute_stats(lerobot_dataset, 32, 8)
     hf_dataset = hf_dataset.with_format(None)
-    hf_dataset.save_to_disk(Path(out_dir) / "train")
+    hf_dataset.save_to_disk(str(Path(out_dir) / "train"))
     save_meta_data(ds_info, stats, episode_data_index, Path(out_dir) / "meta_data")
 
     # Save info
