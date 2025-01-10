@@ -247,6 +247,7 @@ class RICPolicy(nn.Module,
         super().__init__()
         self.config = config
         self.model = RICModel(config)
+        self.compute_loss = self.model.policy_model.compute_loss
 
         if config.input_normalization_modes is not None:
             self.normalize_inputs = Normalize(
