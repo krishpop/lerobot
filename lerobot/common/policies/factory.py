@@ -16,11 +16,29 @@
 import inspect
 import logging
 import os
+from jax2torch import jax2torch
+import torch
 
 from omegaconf import DictConfig, OmegaConf
 
 from lerobot.common.policies.policy_protocol import Policy
 from lerobot.common.utils.utils import get_safe_torch_device
+
+
+class IQLTorchModel(torch.nn.Module):
+    def __init__(self, jax_model):
+        super().__init__()
+        self.jax_model = jax_model
+        # Convert JAX apply_fn to a PyTorch-compatible function
+        self.apply_fn = jax2torch(self.jax_model.apply_fn.apply)
+
+        # Convert JAX parameters to PyTorch tensors and register them as buffers
+        for key, value in self.jax_model.params.items():
+            self.register_buffer(key, torch.tensor(value))
+
+    def forward(self, *inputs):
+        # Use the converted apply_fn with stored parameters
+        return self.apply_fn({'params': {k: v.numpy() for k, v in self.named_buffers()}}, *inputs)
 
 def _policy_cfg_from_hydra_cfg(policy_cfg_class, hydra_cfg):
     expected_kwargs = set(inspect.signature(policy_cfg_class).parameters)
@@ -78,7 +96,7 @@ def get_policy_and_config_classes(name: str) -> tuple[Policy, object]:
         raise NotImplementedError(f"Policy with name {name} is not implemented.")
 
 
-def make_critic(hydra_cfg: DictConfig, policy: Policy):
+def make_critic(hydra_cfg: DictConfig, policy: Policy, env):
     from pathlib import Path
 
     from lerobot.common.logger import Logger
@@ -114,6 +132,38 @@ def make_critic(hydra_cfg: DictConfig, policy: Policy):
         assert os.path.exists(tdmpc2_cfg.checkpoint), f'Checkpoint {tdmpc2_cfg.checkpoint} not found! Must be a valid filepath.'
         agent.load(tdmpc2_cfg.checkpoint)
         return agent
+    elif ".npz" in pretrained_critic_path:
+        from learner import Learner
+        from absl import flags
+        from ml_collections import config_flags
+        from train_offline import load_checkpoint
+        FLAGS = flags.FLAGS
+        flags.DEFINE_string('env_name', 'gym_sorting/sorting-v0', 'Environment name.')
+        flags.DEFINE_string('save_dir', './tmp/', 'Tensorboard logging dir.')
+        flags.DEFINE_integer('seed', 1, 'Random seed.')
+        flags.DEFINE_integer('eval_episodes', 50,
+                            'Number of episodes used for evaluation.')
+        flags.DEFINE_integer('log_interval', 10000, 'Logging interval.')
+        flags.DEFINE_integer('eval_interval', 100000, 'Eval interval.')
+        flags.DEFINE_integer('save_interval', 100000, 'Save interval')
+        flags.DEFINE_integer('batch_size', 256, 'Mini batch size.')
+        flags.DEFINE_integer('max_steps', int(1e8), 'Number of training steps.')
+        flags.DEFINE_boolean('tqdm', True, 'Use tqdm progress bar.')
+        flags.DEFINE_string('task', 'sorting', 'task name')
+        config_flags.DEFINE_config_file(
+            'config',
+            'default.py',
+            'File path to the training hyperparameter configuration.',
+            lock_config=False)
+        kwargs = dict(FLAGS.config)
+        agent = Learner(FLAGS.seed,
+                        env.observation_space.sample()[np.newaxis],
+                        env.action_space.sample()[np.newaxis],
+                        max_steps=FLAGS.max_steps,
+                        **kwargs)
+        load_checkpoint(agent, pretrained_critic_path)
+        torch_critic = IQLTorchModel(agent.critic)
+        return torch_critic
     else:
         last_pretrained_model_dir = Logger.get_last_pretrained_model_dir(pretrained_critic_path)
         assert last_pretrained_model_dir.exists(), f"Last pretrained model dir {last_pretrained_model_dir} does not exist"
