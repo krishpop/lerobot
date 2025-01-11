@@ -88,6 +88,8 @@ class VQBeTPolicy(
                 "observation.state": deque(maxlen=self.config.n_obs_steps),
                 "action": deque(maxlen=self.config.action_chunk_size),
             }
+        if "observation.environment_state" in self.config.input_shapes:
+                self._queues["observation.environment_state"] = deque(maxlen=self.config.n_obs_steps)
         else:
             self._queues = {
                 "observation.state": deque(maxlen=self.config.n_obs_steps),
