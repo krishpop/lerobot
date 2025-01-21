@@ -16,33 +16,31 @@ if lerobot_spec is None:
 lerobot_root = Path(lerobot_spec.origin).parent
 config_path = lerobot_root / "configs"
 
-for dataset_root in ["pusht_dataset_scale_1", "pusht_dataset_scale_0.5", "pusht_dataset_scale_2"]:
-    print(dataset_root)
-    with initialize_config_dir(config_dir=str(config_path)):
-        cfg = compose(
-            config_name="default.yaml", overrides=["policy=vqbet", "env=pusht"]
-        )
-    offline_dataset = make_dataset(cfg, root="../../" + dataset_root)
-    hf_dataset = offline_dataset.hf_dataset
-    episode_data_index = offline_dataset.episode_data_index
-    episode_indices = torch.stack(offline_dataset.hf_dataset.filter(lambda x: x['next.reward'] > 0.95)['episode_index']).unique()
-    print("episode indices ", episode_indices)
-    filtered_hf_dataset = offline_dataset.hf_dataset.filter(lambda x: x['episode_index'].item() in episode_indices)
-    filtered_episode_data_index = calculate_episode_data_index(offline_dataset.hf_dataset)
-    filtered_hf_dataset = reset_episode_index(filtered_hf_dataset)
-    info = {
-        "fps": 4,
-        "video": False,
-    }
-
-    lerobot_dataset = LeRobotDataset.from_preloaded(
-        repo_id="lerobot/pusht",
-        hf_dataset=hf_dataset,
-        episode_data_index=episode_data_index,
-        info=info,
-        videos_dir="mmlfd_videos",
+# for dataset_root in ["pusht_dataset_scale_1", "pusht_dataset_scale_0.5", "pusht_dataset_scale_2"]:
+# print(dataset_root)
+with initialize_config_dir(config_dir=str(config_path)):
+    cfg = compose(
+        config_name="default.yaml", overrides=["policy=diffusion_d3il_sorting_state", "env=d3il_sorting_state", "dataset_repo_id=bhavnasud/d3il_sorting_2boxes_suboptimal_trajectories"]
     )
-    stats = compute_stats(lerobot_dataset, 32, 8)
-    hf_dataset = hf_dataset.with_format(None)
-    hf_dataset.save_to_disk(f"/juno/u/bsud2/multi_task_experts/lerobot/{dataset_root}_successes/lerobot/pusht/train")
-    save_meta_data(info, stats, episode_data_index, Path(f"/juno/u/bsud2/multi_task_experts/lerobot/{dataset_root}_successes/lerobot/pusht/meta_data"))
+offline_dataset = make_dataset(cfg)
+hf_dataset = offline_dataset.hf_dataset
+filtered_hf_dataset = hf_dataset.filter(lambda x: x['next.reward'].item() > 0.0)
+print("filtered dataset ", filtered_hf_dataset)
+filtered_episode_data_index = calculate_episode_data_index(filtered_hf_dataset)
+filtered_hf_dataset = reset_episode_index(filtered_hf_dataset)
+info = {
+    "fps": 4,
+    "video": False,
+}
+
+lerobot_dataset = LeRobotDataset.from_preloaded(
+    repo_id="bhavnasud/d3il_sorting_2boxes_suboptimal_trajectories_successes",
+    hf_dataset=filtered_hf_dataset,
+    episode_data_index=filtered_episode_data_index,
+    info=info,
+    # videos_dir="mmlfd_videos",
+)
+stats = compute_stats(lerobot_dataset, 32, 8)
+filtered_hf_dataset = filtered_hf_dataset.with_format(None)
+filtered_hf_dataset.save_to_disk(f"/juno/u/bsud2/multi_task_experts/lerobot/d3il_sorting_2boxes_suboptimal_trajectories_successes/lerobot/d3il_sorting/train")
+save_meta_data(info, stats, filtered_episode_data_index, Path(f"/juno/u/bsud2/multi_task_experts/lerobot/d3il_sorting_2boxes_suboptimal_trajectories_successes/lerobot/d3il_sorting/meta_data"))
