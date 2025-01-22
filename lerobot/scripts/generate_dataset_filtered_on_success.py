@@ -24,7 +24,8 @@ with initialize_config_dir(config_dir=str(config_path)):
     )
 offline_dataset = make_dataset(cfg)
 hf_dataset = offline_dataset.hf_dataset
-filtered_hf_dataset = hf_dataset.filter(lambda x: x['next.reward'].item() > 0.0)
+episode_indices = torch.stack(hf_dataset.filter(lambda x: x['next.reward'] > 0.0)['episode_index']).unique()
+filtered_hf_dataset = hf_dataset.filter(lambda x: x['episode_index'].item() in episode_indices)
 print("filtered dataset ", filtered_hf_dataset)
 filtered_episode_data_index = calculate_episode_data_index(filtered_hf_dataset)
 filtered_hf_dataset = reset_episode_index(filtered_hf_dataset)
