@@ -19,9 +19,21 @@ import gymnasium as gym
 from omegaconf import DictConfig
 from gym_pusht.envs.pusht import PushTEnv, MMPushTEnv
 from gym_stacking.envs.stacking import CubeStacking_Env
-import gym_stacking.envs
-import gym_sorting.envs
-import gym_avoiding.envs
+try:
+    import gym_stacking.envs
+except ImportError as e:
+    print("ImportError: gym_stacking.envs not found")
+    pass
+try:
+    import gym_sorting.envs
+except ImportError as e:
+    print("ImportError: gym_sorting.envs not found")
+    pass
+try:
+    import gym_avoiding.envs
+except ImportError as e:
+    print("ImportError: gym_avoiding.envs not found")
+    pass
 
 #from .wrappers import LerobotManiskillWrapper
 
