@@ -53,7 +53,7 @@ def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv
         is_maniskill = True
         package_name = "mani_skill.envs"
 
-    use_wrapper = cfg.env.get("use_wrapper", True)
+    use_wrapper = cfg.env.get("use_wrapper", False)
 
     try:
         importlib.import_module(package_name)
@@ -77,9 +77,9 @@ def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv
         #  wrappers=[LerobotManiskillWrapper], obs_mode="state_dict", render_mode="rgb_array"
         env = ManiSkillVectorEnv(gym.make(gym_handle, disable_env_checker=True, **gym_kwgs), num_envs=n_envs)
     else:
-        from .wrappers import D3ILObservationWrapper
         env_cls = gym.vector.AsyncVectorEnv if cfg.eval.use_async_envs else gym.vector.SyncVectorEnv
         if use_wrapper:
+            from .wrappers import D3ILObservationWrapper
             env_fn = lambda: D3ILObservationWrapper(gym.make(gym_handle, disable_env_checker=True, **gym_kwgs))  #noqa: E731
         else:
             env_fn = lambda: gym.make(gym_handle, disable_env_checker=True, **gym_kwgs)  #noqa: E731
