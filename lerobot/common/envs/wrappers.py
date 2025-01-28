@@ -1,8 +1,87 @@
 import gymnasium as gym
 import numpy as np
 import torch
-from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
 from gymnasium import spaces
+from gymnasium.core import ObservationWrapper
+from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
+
+from lerobot.common.envs.utils import preprocess_observation
+
+
+class D3ILObservationWrapper(ObservationWrapper):
+    """Wrapper that applies LeRobot's observation preprocessing.
+    
+    This wrapper automatically converts environment observations to the LeRobot 
+    format, including proper tensor conversion and image preprocessing.
+    """
+
+    def __init__(self, env: gym.Env):
+        """Initialize the wrapper.
+        
+        Args:
+            env: The environment to wrap.
+        """
+        super().__init__(env)
+        self.remapped_keys = {
+            "agent_pos": "observation.state",
+            "environment_state": "observation.environment_state",
+            "task_index": "task_index",
+        }
+        pixels_dict = (
+            'pixels' in self.env.observation_space.spaces and 
+            isinstance(self.env.observation_space.spaces['pixels'], spaces.Dict)
+        )
+
+        if isinstance(self.env.observation_space, spaces.Dict):
+            obs_spaces = self.env.observation_space.spaces 
+            if pixels_dict:
+                self.remapped_keys.update({
+                    "pixels": {
+                        f"observation.image.{camera}": 
+                            obs_spaces["pixels"][camera] 
+                            for camera in obs_spaces["pixels"]
+                        }
+                })
+            else:
+                self.remapped_keys.update({
+                    "pixels": "observation.image"
+                })
+
+            new_observation_space = spaces.Dict({
+                self.remapped_keys[key]: obs_spaces[key]
+                for key in self.remapped_keys if 
+                (key in obs_spaces and not isinstance(obs_spaces[key], spaces.Dict))
+            })
+            if pixels_dict:
+                for key in self.remapped_keys.get("pixels", []):
+                    new_observation_space[self.remapped_keys["pixels"][key]] = obs_spaces["pixels"][key]
+            else:
+                new_observation_space[self.remapped_keys["pixels"]] = obs_spaces["pixels"]
+                
+        self.observation_space = new_observation_space
+
+
+
+
+    def observation(self, obs):
+        """Transform the observation using LeRobot's preprocessing.
+        
+        Args:
+            obs: Raw observation from the environment.
+            
+        Returns:
+            Preprocessed observation in LeRobot format.
+        """
+        return preprocess_observation(obs)
+
+    def reset(self, **kwargs):
+        print(kwargs)
+        seed = kwargs.get('seed', None)
+        random = kwargs.get('random', True)
+        context = kwargs.get('context', None)
+        obs, info = self.env.reset(seed=seed, random=random, context=context)
+        return self.observation(obs), info
+
 
 class LerobotManiskillWrapper(ManiSkillVectorEnv):
     def __init__(self, env, num_envs, **kwargs):

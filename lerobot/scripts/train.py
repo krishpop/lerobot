@@ -51,7 +51,8 @@ from lerobot.common.utils.utils import (
 from lerobot.scripts.eval import eval_policy
 
 from dact.utils.dataset_utils import create_custom_transforms
-from tdmpc2 import TDMPC2
+
+
 
 def make_optimizer_and_scheduler(cfg, policy):
     if cfg.policy.name == "ric":

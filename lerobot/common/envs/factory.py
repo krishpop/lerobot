@@ -35,7 +35,6 @@ except ImportError as e:
     print("ImportError: gym_avoiding.envs not found")
     pass
 
-#from .wrappers import LerobotManiskillWrapper
 
 def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv | None:
     """Makes a gym vector environment according to the evaluation config.
@@ -53,6 +52,8 @@ def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv
     if cfg.env.name.startswith("maniskill"):
         is_maniskill = True
         package_name = "mani_skill.envs"
+
+    use_wrapper = cfg.env.get("use_wrapper", True)
 
     try:
         importlib.import_module(package_name)
@@ -76,12 +77,12 @@ def make_env(cfg: DictConfig, n_envs: int | None = None) -> gym.vector.VectorEnv
         #  wrappers=[LerobotManiskillWrapper], obs_mode="state_dict", render_mode="rgb_array"
         env = ManiSkillVectorEnv(gym.make(gym_handle, disable_env_checker=True, **gym_kwgs), num_envs=n_envs)
     else:
+        from .wrappers import D3ILObservationWrapper
         env_cls = gym.vector.AsyncVectorEnv if cfg.eval.use_async_envs else gym.vector.SyncVectorEnv
-        env = env_cls(
-            [
-                lambda: gym.make(gym_handle, disable_env_checker=True, **gym_kwgs)
-                for _ in range(n_envs if n_envs is not None else cfg.eval.batch_size)
-            ]
-        )
+        if use_wrapper:
+            env_fn = lambda: D3ILObservationWrapper(gym.make(gym_handle, disable_env_checker=True, **gym_kwgs))  #noqa: E731
+        else:
+            env_fn = lambda: gym.make(gym_handle, disable_env_checker=True, **gym_kwgs)  #noqa: E731
+        env = env_cls([env_fn for _ in range(n_envs if n_envs is not None else cfg.eval.batch_size)])
 
     return env
