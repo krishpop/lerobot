@@ -48,14 +48,14 @@ class D3ILObservationWrapper(ObservationWrapper):
                 })
 
             new_observation_space = spaces.Dict({
-                self.remapped_keys[key]: obs_spaces[key]
-                for key in self.remapped_keys if 
-                (key in obs_spaces and not isinstance(obs_spaces[key], spaces.Dict))
+                self.remapped_keys.get(key, f"observation.{key}"): obs_spaces[key]
+                for key in self.remapped_keys 
+                if (key in obs_spaces and not isinstance(obs_spaces[key], spaces.Dict))
             })
             if pixels_dict:
                 for key in self.remapped_keys.get("pixels", []):
                     new_observation_space[self.remapped_keys["pixels"][key]] = obs_spaces["pixels"][key]
-            else:
+            elif "pixels" in obs_spaces:
                 new_observation_space[self.remapped_keys["pixels"]] = obs_spaces["pixels"]
                 
         self.observation_space = new_observation_space
@@ -75,7 +75,6 @@ class D3ILObservationWrapper(ObservationWrapper):
         return preprocess_observation(obs)
 
     def reset(self, **kwargs):
-        print(kwargs)
         seed = kwargs.get('seed', None)
         random = kwargs.get('random', True)
         context = kwargs.get('context', None)
