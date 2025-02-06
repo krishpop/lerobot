@@ -21,6 +21,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from lerobot.common.policies.policy_protocol import Policy
 from lerobot.common.utils.utils import get_safe_torch_device
+from lerobot.common.policies.tdmpc.modeling_tdmpc2 import TDMPC2Policy
 
 def _policy_cfg_from_hydra_cfg(policy_cfg_class, hydra_cfg):
     expected_kwargs = set(inspect.signature(policy_cfg_class).parameters)
@@ -122,7 +123,10 @@ def make_critic(hydra_cfg: DictConfig, policy: Policy):
             critic_cfg = init_hydra_config(str(last_pretrained_model_dir / "config.yaml"))
 
         critic_policy = make_policy(critic_cfg, last_pretrained_model_dir, dataset_stats=None)
-        critic = TDMPCCritic(critic_policy, use_advantage=hydra_cfg.distillation.critic_use_advantage)
+        if isinstance(critic_policy, TDMPC2Policy):
+            critic = TDMPCCritic(critic_policy, use_advantage=False)
+        else:
+            critic = TDMPCCritic(critic_policy, use_advantage=hydra_cfg.distillation.critic_use_advantage)
         critic.set_normalize_stats(policy)
         return critic
 
