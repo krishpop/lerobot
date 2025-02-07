@@ -51,6 +51,7 @@ from lerobot.common.utils.utils import (
 from lerobot.scripts.eval import eval_policy
 
 from dact.utils.dataset_utils import create_custom_transforms
+from tdmpc2 import TDMPC2
 
 
 
@@ -212,18 +213,18 @@ def update_policy_with_critic(
         critic_loss = 0
         predicted_action = output_dict["action_head_output"]["predicted_action_chunk"]
         for critic in critics:
-            # if isinstance(critic, TDMPC2):
-                # normalized_batch = policy.normalize_inputs(batch)
-                # if critic.cfg.task == "d3il-stacking":
-                #     obs = torch.cat((normalized_batch["observation.state"], normalized_batch["observation.environment_state"]), dim=-1)
-                # else:
-                #     obs = normalized_batch["observation.state"]
-                # z = critic.model.encode(obs, None)
-                # estimated_value = critic.model.Qs(z, predicted_action, None, return_type='avg')
-                # critic_loss -= estimated_value.mean()
-            # else:
-            critic_output = critic(batch, predicted_action)
-            critic_loss += critic_output["loss"]
+            if isinstance(critic, TDMPC2):
+                normalized_batch = policy.normalize_inputs(batch)
+                if critic.cfg.task == "d3il-stacking":
+                    obs = torch.cat((normalized_batch["observation.state"], normalized_batch["observation.environment_state"]), dim=-1)
+                else:
+                    obs = normalized_batch["observation.state"]
+                z = critic.model.encode(obs, None)
+                estimated_value = critic.model.Q(z, predicted_action, None, return_type='avg')
+                critic_loss -= estimated_value.mean()
+            else:
+                critic_output = critic(batch, predicted_action)
+                critic_loss += critic_output["loss"]
         critic_loss /= len(critics)  # Average critic loss
         # Combine policy loss and critic loss
         loss = policy_loss + critic_weight * critic_loss

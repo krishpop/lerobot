@@ -104,7 +104,7 @@ def make_critic(hydra_cfg: DictConfig, policy: Policy):
             f"task={task}",
             "model_size=48",
             f"work_dir={work_dir}",
-            "horizon=6",
+            "horizon=8",
             "mpc=false",
             f"checkpoint={pretrained_critic_path}"
         ]
