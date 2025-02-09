@@ -208,6 +208,7 @@ def update_policy_with_critic(
         output_dict = policy.forward(batch, return_predicted_action=True)
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
         policy_loss = output_dict["loss"]
+        policy_batch_loss = output_dict["batch_loss"] # does not have mean applied
 
         # Compute critic loss
         critic_loss = 0
@@ -227,7 +228,15 @@ def update_policy_with_critic(
                 critic_loss += critic_output["loss"]
         critic_loss /= len(critics)  # Average critic loss
         # Combine policy loss and critic loss
-        loss = policy_loss + critic_weight * critic_loss
+        if "successful_trajectory" in batch:
+            successful_trajectory_mask = (batch["successful_trajectory"]
+                                          .repeat(1, policy_batch_loss.shape[1] * policy_batch_loss.shape[2])
+                                          .view(policy_batch_loss.shape))
+            masked_policy_loss = policy_batch_loss[successful_trajectory_mask]
+            masked_policy_loss_mean = masked_policy_loss.mean() if masked_policy_loss.numel() > 0 else torch.tensor(0.0)
+            loss = masked_policy_loss_mean + critic_weight * critic_loss
+        else:
+            loss = policy_loss + critic_weight * critic_loss
 
     grad_scaler.scale(loss).backward()
 

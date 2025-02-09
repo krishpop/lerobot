@@ -11,8 +11,11 @@ if lerobot_spec is None:
 lerobot_root = Path(lerobot_spec.origin).parent
 config_path = lerobot_root / "configs"
 with initialize_config_dir(config_dir=str(config_path)):
-    local_dataset_root = "/juno/u/bsud2/multi_task_experts/lerobot/"
-    local_dataset_repo_id = "d3il_sorting_2boxes_suboptimal_trajectories_successes/lerobot/d3il_sorting/"
+    #local_dataset_root = "/juno/u/bsud2/multi_task_experts/lerobot/"
+    local_dataset_root = "/juno/u/bsud2/lerobot_outputs/"
+    #local_dataset_repo_id = "d3il_sorting_suboptimal_trajectories_2_successes_dataset/"
+    # local_dataset_repo_id = "pusht_suboptimal_trajectories_2_successes_dataset/"
+    local_dataset_repo_id = "d3il_sorting_suboptimal_trajectories_2_labeled_dataset/"
     cfg = compose(
         config_name="default.yaml", overrides=["policy=diffusion_d3il_sorting_state",
                                                "env=d3il_sorting_state",
@@ -20,7 +23,7 @@ with initialize_config_dir(config_dir=str(config_path)):
                                                f"dataset_root={local_dataset_root}"]
     )
     offline_dataset = make_dataset(cfg, root=cfg.dataset_root)
-    repo_id = "bhavnasud/d3il_sorting_2boxes_filtered_suboptimal"
+    repo_id = "bhavnasud/d3il_sorting_suboptimal_trajectories_2_labeled"
     offline_dataset.hf_dataset.push_to_hub(repo_id, revision="main")
     metadata_dir = local_dataset_root + local_dataset_repo_id + "meta_data"
     push_meta_data_to_hub(repo_id, metadata_dir, revision="main")
