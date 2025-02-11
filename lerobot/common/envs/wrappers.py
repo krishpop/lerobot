@@ -37,7 +37,7 @@ class D3ILObservationWrapper(ObservationWrapper):
             if pixels_dict:
                 self.remapped_keys.update({
                     "pixels": {
-                        f"observation.image.{camera}": 
+                        f"observation.images.{camera}": 
                             obs_spaces["pixels"][camera] 
                             for camera in obs_spaces["pixels"]
                         }
@@ -53,15 +53,11 @@ class D3ILObservationWrapper(ObservationWrapper):
                 if (key in obs_spaces and not isinstance(obs_spaces[key], spaces.Dict))
             })
             if pixels_dict:
-                for key in self.remapped_keys.get("pixels", []):
-                    new_observation_space[self.remapped_keys["pixels"][key]] = obs_spaces["pixels"][key]
+                new_observation_space.spaces.update(self.remapped_keys["pixels"])
             elif "pixels" in obs_spaces:
                 new_observation_space[self.remapped_keys["pixels"]] = obs_spaces["pixels"]
                 
         self.observation_space = new_observation_space
-
-
-
 
     def observation(self, obs):
         """Transform the observation using LeRobot's preprocessing.
@@ -72,6 +68,11 @@ class D3ILObservationWrapper(ObservationWrapper):
         Returns:
             Preprocessed observation in LeRobot format.
         """
+        if isinstance(obs.get('pixels', None), dict):
+            for key in obs['pixels']:
+                obs['pixels'][key] = np.ascontiguousarray(obs['pixels'][key])[None, ...]
+        elif isinstance(obs.get('pixels', None), np.ndarray):
+            obs['pixels'] = np.ascontiguousarray(obs['pixels'])[None, ...]
         return preprocess_observation(obs)
 
     def reset(self, **kwargs):
