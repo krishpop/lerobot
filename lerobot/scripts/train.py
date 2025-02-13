@@ -221,7 +221,7 @@ def update_policy_with_critic(
                 else:
                     obs = normalized_batch["observation.state"]
                 z = critic.model.encode(obs, None)
-                estimated_value = critic.model.Q(z, predicted_action, None, return_type='min')
+                estimated_value = critic.model.Q(z, predicted_action, None, return_type='avg')
                 critic_loss -= estimated_value.mean()
             else:
                 critic_output = critic(batch, predicted_action)
