@@ -222,8 +222,24 @@ def update_policy_with_critic(
                     obs = normalized_batch["observation.state"]
                 obs = obs.permute(1, 0, 2)
                 predicted_action = predicted_action.permute(1, 0, 2)
+
+                # calculate estimated value using obs history and corresponding actions Q values
                 z = critic.model.encode(obs, None)
-                estimated_value = critic.model.Q(z, predicted_action, None, return_type='min')
+                # estimated_value = critic.model.Q(z, predicted_action, None, return_type='min')
+
+                # calculate estimated value using Q values of latent rollout
+                zs = torch.empty(policy.config.horizon + 1, z.shape[1], z.shape[2]) # (horizon + 1, batch size, latent dim)
+                z = critic.model.encode(obs[0], None)
+                zs[0] = z
+                for t, _action in enumerate(predicted_action.unbind(0)):
+                    z = critic.model.next(z, _action, None)
+                    zs[t+1] = z
+
+                # # Predictions
+                _zs = zs[:-1]
+                _zs = _zs.to(device)
+                estimated_value = critic.model.Q(_zs, predicted_action, None, return_type='min')
+
                 critic_loss -= estimated_value.mean()
             else:
                 critic_output = critic(batch, predicted_action)

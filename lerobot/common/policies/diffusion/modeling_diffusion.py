@@ -172,7 +172,7 @@ class DiffusionPolicy(
         batch = self.normalize_targets(batch)
         loss_mean, loss = self.diffusion.compute_loss(batch)
         if return_predicted_action:
-            predicted_actions = self.diffusion.generate_actions(batch, step_range=[0, self.config.n_obs_steps])
+            predicted_actions = self.diffusion.generate_actions(batch, step_range=[0, self.config.horizon])
             return {"loss": loss_mean, "action_head_output": {"predicted_action_chunk": predicted_actions}, "batch_loss": loss}
         return {"loss": loss_mean}
 
